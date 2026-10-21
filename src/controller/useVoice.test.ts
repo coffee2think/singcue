@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { toSpeechError, type SpeechResult } from '../adapters/speechAdapter/index.ts';
 import { DEFAULT_SETTINGS } from '../core/defaultSettings.ts';
-import type { PlaybackState } from '../types.ts';
+import type { Line, PlaybackState } from '../types.ts';
 import {
   INITIAL_VOICE_STATE,
   LATENCY_TIMEOUT_MS,
@@ -11,6 +11,8 @@ import {
   isAutoplayBlocked,
   judgeResult,
   measureLatency,
+  phraseReasonText,
+  resolvePhrase,
   summarizeLatencies,
   voiceReducer,
   type LatencyRecord,
@@ -251,5 +253,90 @@ describe('voiceReducer 반응 시간', () => {
     expect(state.log).toHaveLength(MAX_LOG_ENTRIES);
     expect(state.latencies).toHaveLength(MAX_LATENCY_RECORDS);
     expect(state.latencies[0].ms).toBe(MAX_LATENCY_RECORDS + 1);
+  });
+});
+
+// 테스트용으로 지어낸 가상의 구절
+const lines: Line[] = [
+  { t: 10, text: '파란 우산을 펼쳐 들고' },
+  { t: 20, text: '골목 끝까지 걸어가요' },
+  { t: 30, text: '후렴처럼 다시 부르는 말' },
+  { t: 40, text: '종이배를 띄워 보내요' },
+  { t: 50, text: '후렴처럼 다시 부르는 말' },
+];
+const THRESHOLD = DEFAULT_SETTINGS.similarityThreshold;
+
+describe('resolvePhrase', () => {
+  it('기준 이상이면 그 다음 구절의 시작 시간으로 이동한다', () => {
+    expect(resolvePhrase(['파란 우산을 펼쳐 들고'], { lines, endT: 60 }, THRESHOLD, 15)).toEqual({
+      kind: 'jump',
+      lineIndex: 0,
+      text: '파란 우산을 펼쳐 들고',
+      last: false,
+      score: 1,
+      threshold: THRESHOLD,
+      target: 20,
+      from: null,
+    });
+  });
+
+  it('인식 후보 중 하나라도 맞으면 그 구절로 본다', () => {
+    const outcome = resolvePhrase(['전혀 다른 말', '골목 끝까지 걸어가요'], { lines, endT: 60 }, THRESHOLD, 25);
+    expect(outcome).toMatchObject({ kind: 'jump', lineIndex: 1, target: 30 });
+  });
+
+  it('기준 미만이면 이동하지 않고 가장 가까운 구절과 점수를 돌려준다', () => {
+    const outcome = resolvePhrase(['종이컵을 태워 버려요'], { lines, endT: 60 }, 0.9, 0);
+    expect(outcome).toMatchObject({ kind: 'below', lineIndex: 3, text: '종이배를 띄워 보내요', threshold: 0.9 });
+    if (outcome.kind !== 'below') throw new Error('기준 미만이어야 한다');
+    expect(outcome.score).toBeGreaterThan(0);
+    expect(outcome.score).toBeLessThan(0.9);
+  });
+
+  it('바뀐 유사도 기준을 그대로 쓴다', () => {
+    expect(resolvePhrase(['종이컵을 태워 버려요'], { lines, endT: 60 }, 0.2, 0)).toMatchObject({ kind: 'jump', target: 50 });
+  });
+
+  it('마지막 구절이면 endT로 이동하고, endT가 없으면 이동하지 않는다', () => {
+    const last = ['후렴처럼 다시 부르는 말'];
+    expect(resolvePhrase(last, { lines, endT: 60 }, THRESHOLD, 55)).toMatchObject({
+      kind: 'jump',
+      lineIndex: 4,
+      last: true,
+      target: 60,
+    });
+    expect(resolvePhrase(last, { lines, endT: null }, THRESHOLD, 55)).toMatchObject({
+      kind: 'no-next',
+      lineIndex: 4,
+      last: true,
+    });
+  });
+
+  it('반복 구절은 현재 재생 위치 힌트로 방금 부른 구절을 고른다(#20)', () => {
+    const repeated = ['후렴처럼 다시 부르는 말'];
+    expect(resolvePhrase(repeated, { lines, endT: 60 }, THRESHOLD, 35)).toMatchObject({ lineIndex: 2, target: 40 });
+    expect(resolvePhrase(repeated, { lines, endT: 60 }, THRESHOLD, 52)).toMatchObject({ lineIndex: 4, target: 60 });
+    // 힌트가 없으면 첫 번째 줄
+    expect(resolvePhrase(repeated, { lines, endT: 60 }, THRESHOLD, null)).toMatchObject({ lineIndex: 2 });
+  });
+
+  it('가사 매핑이 없으면 비교하지 않는다', () => {
+    expect(resolvePhrase(['파란 우산'], { lines: [], endT: null }, THRESHOLD, 0)).toEqual({ kind: 'no-lines' });
+  });
+});
+
+describe('phraseReasonText', () => {
+  const match = { lineIndex: 0, text: '파란 우산을 펼쳐 들고', last: false, score: 0.3, threshold: 0.5 };
+
+  it('이동했으면 이유가 없다', () => {
+    expect(phraseReasonText({ ...match, kind: 'jump', target: 20, from: 18.5 })).toBeNull();
+  });
+
+  it('이동하지 않은 이유와 다시 말할 안내를 만든다', () => {
+    expect(phraseReasonText({ ...match, kind: 'below' })).toContain('0.50');
+    expect(phraseReasonText({ ...match, kind: 'below' })).toContain('다시 말해');
+    expect(phraseReasonText({ ...match, kind: 'no-next', last: true })).toContain('마지막 구절 다음 위치');
+    expect(phraseReasonText({ kind: 'no-lines' })).toContain('가사 매핑');
+    expect(phraseReasonText({ ...match, kind: 'jump', target: 20, from: null })).toContain('플레이어');
   });
 });

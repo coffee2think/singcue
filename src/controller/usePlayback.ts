@@ -9,8 +9,10 @@ import type { PlaybackState, Section } from '../types.ts';
 import {
   SECTION_END_CHECK_MS,
   canPlay,
+  canPlayAt,
   canStop,
   checkSectionEnd,
+  playFrom,
   playSection,
   startSectionEndWatch,
   toMachineEvent,
@@ -28,6 +30,11 @@ export type UsePlayback = {
   unload: () => void;
   /** 구간 시작에서 프리롤만큼 앞부터 재생한다. 재생할 수 없으면 아무것도 하지 않는다 */
   play: (section: Section | null) => void;
+  /**
+   * 임의 위치(초)에서 프리롤만큼 앞부터 재생한다(구절 인식 점프). 옮긴 위치(초)를 돌려주고, 재생할 수 없으면 null이다.
+   * 구간 끝 확인은 마지막으로 `play`에 넘긴 구간을 그대로 쓴다. 영상 화면을 직접 눌러 재생할 때와 같다
+   */
+  playAt: (time: number) => number | null;
   stop: () => void;
   /**
    * 자동 반복의 바퀴 완료 알림을 받는다. 해제 함수를 돌려준다. 렌더마다 같은 함수다.
@@ -88,9 +95,17 @@ export function usePlayback(playerRef: RefObject<PlayerAdapter | null>, storage:
     playSection(player, section, storage.loadSettings().preroll);
   }
 
+  function playAt(time: number): number | null {
+    const player = playerRef.current;
+    if (!player || !canPlayAt(state)) return null;
+    // 위치가 옮겨지므로 직전 위치를 버려, 옮기기 전 위치와 비교해 구간 끝을 지났다고 보지 않게 한다
+    if (watchRef.current) watchRef.current.lastTime = null;
+    return playFrom(player, time, storage.loadSettings().preroll);
+  }
+
   function stop() {
     if (canStop(state)) playerRef.current?.pause();
   }
 
-  return { state, onPlayerEvent, unload, play, stop, subscribeLap };
+  return { state, onPlayerEvent, unload, play, playAt, stop, subscribeLap };
 }
