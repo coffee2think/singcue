@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>음성 제어 노래 연습 PoC</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1f1f1c;--muted:#6b6b63;--line:#dcdcd2;--card:#fff;--accent:#2563eb;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1a18;--fg:#ecece6;--muted:#9a9a90;--line:#3a3a35;--card:#232320;--accent:#6ea0ff;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,"Segoe UI","Noto Sans KR",sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:20px;margin:0 0 6px}
+h2{font-size:16px;margin:0 0 12px}
+.muted{color:var(--muted);font-size:13px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.row.meta{gap:16px;font-size:14px}
+input,select,textarea,button{font:inherit;color:inherit}
+input[type=text],input[type=number],select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:transparent}
+#url{flex:1;min-width:200px}
+textarea{min-height:110px;resize:vertical}
+button{padding:8px 14px;border:1px solid var(--line);border-radius:8px;background:transparent;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.video{position:relative;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden}
+.video iframe,#player{position:absolute;inset:0;width:100%;height:100%}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:560px){.grid2{grid-template-columns:1fr}}
+label{display:block;font-size:13px;color:var(--muted)}
+label.chk{display:flex;gap:8px;align-items:flex-start;color:var(--fg);margin:8px 0}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;border:1px solid var(--line);font-size:13px}
+.pill.on{border-color:var(--ok);color:var(--ok)}
+.live{margin:8px 0;padding:8px 10px;border:1px dashed var(--line);border-radius:8px;font-size:14px;min-height:38px}
+.meter{height:14px;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:8px 0}
+#meterBar{height:100%;width:0;background:var(--ok)}
+#stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px}
+#stats div{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}
+#stats b{display:block;font-size:16px}
+ol.check{margin:8px 0 0;padding-left:20px;font-size:13px;color:var(--muted)}
+#log{list-style:none;margin:8px 0 0;padding:0;max-height:420px;overflow:auto;font-size:13px}
+#log li{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
+#log .tag{flex:none;width:44px;font-weight:600}
+#log .time{flex:none;width:62px;color:var(--muted)}
+#log .msg{flex:1;word-break:break-all}
+#log li.cmd .tag{color:var(--ok)}
+#log li.latency .tag{color:var(--accent)}
+#log li.warn .tag,#log li.ignored .tag,#log li.restart .tag{color:var(--warn)}
+#log li.error .tag{color:var(--bad)}
+details summary{cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>음성 제어 노래 연습 PoC</h1>
+<p class="muted">Chrome 권장. 이 페이지는 음원과 가사를 포함하지 않습니다. 링크와 가사는 직접 입력하세요.</p>
+<ol class="check">
+  <li>자동재생: 마이크를 켠 뒤 "시작"이라고 말했을 때 재생이 시작되는가</li>
+  <li>인식률: 정지·시작 명령을 각각 10번씩 말해 몇 번 실행되는가</li>
+  <li>지연: 아래 통계의 반응 지연. 버튼 기준선과 비교</li>
+  <li>환경: 이어폰과 스피커 상태에서 재생 중 "스탑"이 인식되는가</li>
+  <li>구절 인식: 말하듯 읽은 구절의 유사도가 어느 정도인가</li>
+  <li>끊김: 인식 세션이 얼마나 자주 재시작되는가</li>
+</ol>
+
+<section>
+  <h2>1. 영상 불러오기</h2>
+  <div class="row">
+    <input type="text" id="url" placeholder="테스트할 YouTube 링크 또는 영상 ID">
+    <button id="loadBtn">불러오기</button>
+  </div>
+  <div class="video"><div id="player"></div></div>
+  <div class="row meta">
+    <span>상태: <b id="state">-</b></span>
+    <span>위치: <b id="time">0:00</b></span>
+    <span>여기부터: <b id="mark">없음</b></span>
+  </div>
+  <div class="row">
+    <button id="markBtn">여기부터 마킹</button>
+    <button id="btnPlay">버튼으로 시작</button>
+    <button id="btnStop">버튼으로 정지</button>
+  </div>
+  <p class="muted">버튼으로 시작·정지한 반응 시간이 음성 명령과 비교하는 기준선입니다.</p>
+</section>
+
+<section>
+  <h2>2. 음성 명령</h2>
+  <div class="row">
+    <button id="micBtn" class="primary">마이크 시작</button>
+    <span id="micState" class="pill">꺼짐</span>
+    <button id="meterBtn">입력 레벨만 확인</button>
+  </div>
+  <div class="meter"><div id="meterBar"></div></div>
+  <div class="row meta">
+    <span>입력 장치: <b id="meterDev">-</b></span>
+    <span>레벨: <b id="meterDb">-</b></span>
+  </div>
+  <div class="live">인식 중: <span id="live">-</span></div>
+  <div class="grid2">
+    <label>정지 명령 (쉼표로 구분)<input type="text" id="cmdStop" value="잠깐,스탑,스톱,정지,멈춰,stop"></label>
+    <label>시작 명령 (쉼표로 구분)<input type="text" id="cmdStart" value="시작,재생해,틀어줘,음악큐"></label>
+  </div>
+  <div class="grid2" style="margin-top:10px">
+    <label>프리롤 (초)<input type="number" id="preroll" step="0.5" min="0" value="1.5"></label>
+    <label>테스트 환경
+      <select id="env">
+        <option>이어폰</option>
+        <option>스피커(볼륨 낮음)</option>
+        <option>스피커(볼륨 높음)</option>
+      </select>
+    </label>
+  </div>
+  <label class="chk"><input type="checkbox" id="interim"><span>중간 결과로도 명령 실행 (반응이 빨라지지만 오인식 위험이 있음)</span></label>
+  <label class="chk"><input type="checkbox" id="gate" checked><span>상태별 허용 명령 제한 (재생 중엔 정지만, 정지 중엔 시작만)</span></label>
+</section>
+
+<section>
+  <details>
+    <summary>3. 구절 인식 테스트 (선택)</summary>
+    <p class="muted">한 줄에 "분:초 구절" 형식으로 직접 입력하세요. 말한 구절과 가장 가까운 구절을 찾아 다음 구절 위치로 이동합니다.</p>
+    <textarea id="lyrics" placeholder="0:12 첫 번째 구절을 여기에 입력&#10;0:18 두 번째 구절을 여기에 입력&#10;0:25 세 번째 구절을 여기에 입력"></textarea>
+    <div class="row meta"><span id="lineCount">0개 구절</span></div>
+    <div class="grid2">
+      <label>유사도 기준 (0~1)<input type="number" id="th" step="0.05" min="0" max="1" value="0.6"></label>
+    </div>
+    <label class="chk"><input type="checkbox" id="jump" checked><span>기준 이상이면 다음 구절 위치로 이동해 재생</span></label>
+  </details>
+</section>
+
+<section>
+  <h2>4. 결과</h2>
+  <div id="stats"></div>
+  <div class="row">
+    <button id="copyBtn">로그 JSON 복사</button>
+    <button id="clearBtn">로그 지우기</button>
+  </div>
+  <ul id="log"></ul>
+</section>
+</main>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const norm = s => String(s).toLowerCase().replace(/[\s.,!?~…'"“”‘’·\-]/g, '');
+const fmt = s => { s = Math.max(0, s); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); };
+const STATE = { '-1': '시작 전', 0: '종료', 1: '재생 중', 2: '정지', 3: '버퍼링', 5: '준비됨' };
+const TAG = { stt: '인식', cmd: '명령', ignored: '무시', latency: '지연', phrase: '구절', warn: '경고', error: '오류', info: '정보', restart: '재시작' };
+
+let player = null, playerReady = false, apiReady = false;
+let markSec = null, lines = [];
+let rec = null, recWanted = false;
+let pending = null, lastActionAt = 0, handled = new Set();
+let speechStartAt = 0, firstInterimAt = 0;
+const stats = { finals: 0, executed: 0, ignored: 0, restarts: 0, errors: 0, lat: [], latSpeech: [] };
+const logEntries = [];
+
+/* ---------- 로그와 통계 ---------- */
+function log(type, msg, extra) {
+  logEntries.push(Object.assign({ t: new Date().toISOString(), type, msg }, extra || {}));
+  if (logEntries.length > 500) logEntries.shift();
+  const li = document.createElement('li');
+  li.className = type;
+  for (const cls of ['tag', 'time', 'msg']) { const s = document.createElement('span'); s.className = cls; li.appendChild(s); }
+  li.children[0].textContent = TAG[type] || type;
+  li.children[1].textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+  li.children[2].textContent = msg;
+  $('log').prepend(li);
+  while ($('log').children.length > 200) $('log').lastChild.remove();
+}
+const avg = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null;
+const mx = a => a.length ? Math.max(...a) : null;
+const ms = v => v == null ? '-' : v + 'ms';
+function updateStats() {
+  const items = [
+    ['최종 인식', stats.finals + '회'],
+    ['명령 실행', stats.executed + '회'],
+    ['명령 무시', stats.ignored + '회'],
+    ['세션 재시작', stats.restarts + '회'],
+    ['STT 오류', stats.errors + '회'],
+    ['지연 평균 (결과→상태)', ms(avg(stats.lat))],
+    ['지연 최대 (결과→상태)', ms(mx(stats.lat))],
+    ['지연 평균 (발화 시작→상태)', ms(avg(stats.latSpeech))]
+  ];
+  $('stats').innerHTML = items.map(([k, v]) => '<div>' + k + '<b>' + v + '</b></div>').join('');
+}
+
+/* ---------- YouTube 플레이어 ---------- */
+window.onYouTubeIframeAPIReady = () => { apiReady = true; log('info', 'YouTube IFrame API 준비됨'); };
+const apiScript = document.createElement('script');
+apiScript.src = 'https://www.youtube.com/iframe_api';
+document.head.appendChild(apiScript);
+
+function parseId(v) {
+  v = v.trim();
+  if (/^[\w-]{11}$/.test(v)) return v;
+  const m = v.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+$('loadBtn').onclick = () => {
+  const id = parseId($('url').value);
+  if (!id) { log('error', '유효한 YouTube 링크가 아닙니다'); return; }
+  if (!apiReady) { log('warn', 'IFrame API를 불러오는 중입니다. 잠시 후 다시 시도하세요'); return; }
+  if (player && playerReady) { player.cueVideoById(id); log('info', '영상을 바꿨습니다'); return; }
+  const vars = { playsinline: 1, rel: 0 };
+  if (location.protocol.indexOf('http') === 0) vars.origin = location.origin;
+  player = new YT.Player('player', {
+    videoId: id,
+    playerVars: vars,
+    events: {
+      onReady: () => { playerReady = true; log('info', '플레이어 준비됨'); },
+      onStateChange: onState,
+      onError: e => log('error', '플레이어 오류 코드 ' + e.data + ' (file:// 로 열었다면 로컬 서버로 여세요)')
+    }
+  });
+};
+setInterval(() => { if (playerReady) $('time').textContent = fmt(player.getCurrentTime()); }, 250);
+
+function onState(e) {
+  const st = e.data;
+  $('state').textContent = STATE[st] != null ? STATE[st] : st;
+  if (!pending) return;
+  if ((pending.action === 'start' && st === 1) || (pending.action === 'stop' && st === 2)) {
+    const now = performance.now();
+    const l = Math.round(now - pending.tTrigger);
+    const ls = pending.tSpeech ? Math.round(now - pending.tSpeech) : null;
+    if (pending.source !== 'button') { stats.lat.push(l); if (ls != null) stats.latSpeech.push(ls); }
+    const label = pending.action === 'start' ? '재생' : '정지';
+    const how = pending.source === 'button' ? '버튼 기준선' : (pending.viaInterim ? '중간 결과로 실행' : '최종 결과로 실행');
+    log('latency', label + ' 반응 ' + l + 'ms' + (ls != null ? ' (발화 시작부터 ' + ls + 'ms)' : '') + ' · ' + how, { ms: l, speechMs: ls, source: pending.source || 'voice' });
+    pending = null;
+    updateStats();
+  }
+}
+function setPending(action, ctx) {
+  const p = Object.assign({ action }, ctx);
+  pending = p;
+  if (action === 'start') {
+    setTimeout(() => {
+      if (pending === p) log('warn', '3초 안에 재생 상태가 되지 않았습니다. 자동재생 정책이나 버퍼링을 확인하세요');
+    }, 3000);
+  }
+}
+function doStart(ctx, targetSec) {
+  const pre = Math.max(0, parseFloat($('preroll').value) || 0);
+  const t = targetSec != null ? targetSec : markSec;
+  if (t != null) player.seekTo(Math.max(0, t - pre), true);
+  setPending('start', ctx);
+  player.playVideo();
+}
+function doStop(ctx) { setPending('stop', ctx); player.pauseVideo(); }
+
+$('markBtn').onclick = () => {
+  if (!playerReady) return;
+  markSec = player.getCurrentTime();
+  $('mark').textContent = fmt(markSec);
+  log('info', '여기부터 마킹: ' + fmt(markSec));
+};
+$('btnPlay').onclick = () => { if (playerReady) doStart({ tTrigger: performance.now(), source: 'button' }); };
+$('btnStop').onclick = () => { if (playerReady) doStop({ tTrigger: performance.now(), source: 'button' }); };
+
+/* ---------- 명령 판별 ---------- */
+function getCmds() {
+  const sp = id => $(id).value.split(',').map(norm).filter(Boolean);
+  return { stop: sp('cmdStop'), start: sp('cmdStart') };
+}
+function matchCmd(alts) {
+  const c = getCmds();
+  for (let i = 0; i < alts.length; i++) {
+    const n = norm(alts[i]);
+    for (const w of c.stop) if (n.includes(w)) return { type: 'stop', word: w, alt: i, text: alts[i] };
+    for (const w of c.start) if (n.includes(w)) return { type: 'start', word: w, alt: i, text: alts[i] };
+  }
+  return null;
+}
+function onCommand(m, ctx) {
+  if (!playerReady) { log('warn', '플레이어가 준비되지 않았습니다'); return; }
+  const now = performance.now();
+  const name = m.type === 'stop' ? '정지' : '시작';
+  if (now - lastActionAt < 800) {
+    stats.ignored++; log('ignored', '"' + m.text + '" → ' + name + ' 명령 무시 (직전 명령 후 800ms 이내)'); updateStats(); return;
+  }
+  const st = player.getPlayerState();
+  const playing = st === 1 || st === 3;
+  if ($('gate').checked && ((m.type === 'stop' && !playing) || (m.type === 'start' && playing))) {
+    stats.ignored++; log('ignored', '"' + m.text + '" → ' + name + ' 명령 무시 (현재 상태: ' + STATE[st] + ')'); updateStats(); return;
+  }
+  lastActionAt = now;
+  stats.executed++;
+  log('cmd', '"' + m.text + '" → ' + name + ' 실행 (일치 단어: ' + m.word + (m.alt > 0 ? ', 대안 ' + m.alt + '번째' : '') + ')');
+  if (m.type === 'stop') doStop(ctx); else doStart(ctx);
+  updateStats();
+}
+
+/* ---------- 구절 매칭 ---------- */
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+function sim(a, b) {
+  if (!a || !b) return 0;
+  const full = 1 - lev(a, b) / Math.max(a.length, b.length);
+  const pre = b.slice(0, a.length);
+  const part = 1 - lev(a, pre) / Math.max(a.length, pre.length);
+  return Math.max(full, part);
+}
+function parseLines() {
+  lines = $('lyrics').value.split('\n').map(s => s.trim()).filter(Boolean).map(s => {
+    const m = s.match(/^(\d+):(\d{1,2}(?:\.\d+)?)\s+(.+)$/);
+    return m ? { t: +m[1] * 60 + parseFloat(m[2]), text: m[3], norm: norm(m[3]) } : null;
+  }).filter(Boolean);
+  $('lineCount').textContent = lines.length + '개 구절';
+}
+$('lyrics').addEventListener('input', parseLines);
+function phraseMatch(alts, now) {
+  if (!lines.length) return;
+  let best = { s: -1 };
+  alts.forEach((alt, ai) => {
+    const n = norm(alt);
+    lines.forEach((ln, li) => { const s = sim(n, ln.norm); if (s > best.s) best = { s, li, ai, alt }; });
+  });
+  const th = parseFloat($('th').value) || 0.6;
+  const ln = lines[best.li], next = lines[best.li + 1];
+  const pass = best.s >= th;
+  log('phrase',
+    '가장 가까운 구절 "' + ln.text + '" (유사도 ' + best.s.toFixed(2) + ', 기준 ' + th + ')' +
+    (pass ? (next ? ' → 다음 구절 ' + fmt(next.t) : ' → 마지막 구절이라 다음 구절 없음') : ' → 기준 미달, 이동 안 함'),
+    { score: best.s });
+  if (pass && next && $('jump').checked && playerReady) {
+    stats.executed++;
+    doStart({ tTrigger: now, tSpeech: speechStartAt || null }, next.t);
+    updateStats();
+  }
+}
+
+/* ---------- 음성 인식 ---------- */
+function setMic(on) {
+  $('micState').textContent = on ? '듣는 중' : (recWanted ? '재시작 중' : '꺼짐');
+  $('micState').classList.toggle('on', on);
+  $('micBtn').textContent = recWanted ? '마이크 끄기' : '마이크 시작';
+}
+function startRec() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { log('error', '이 브라우저는 Web Speech API를 지원하지 않습니다. Chrome을 사용하세요'); recWanted = false; setMic(false); return; }
+  rec = new SR();
+  rec.lang = 'ko-KR';
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.maxAlternatives = 5;
+  rec.onstart = () => { handled.clear(); setMic(true); };
+  rec.onspeechstart = () => { speechStartAt = performance.now(); firstInterimAt = 0; };
+  rec.onresult = ev => {
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const r = ev.results[i];
+      const alts = Array.from(r).map(a => a.transcript.trim());
+      const isFinal = r.isFinal;
+      const now = performance.now();
+      if (!isFinal && !firstInterimAt) firstInterimAt = now;
+      $('live').textContent = (isFinal ? '' : '… ') + alts[0];
+      let m = null;
+      if (isFinal || $('interim').checked) m = matchCmd(alts);
+      if (m && !handled.has(i)) {
+        handled.add(i);
+        onCommand(m, { tTrigger: now, tSpeech: speechStartAt || null, viaInterim: !isFinal, source: 'voice' });
+      }
+      if (isFinal) {
+        stats.finals++;
+        const conf = r[0].confidence;
+        const toFinal = speechStartAt ? Math.round(now - speechStartAt) : null;
+        const toFirst = (speechStartAt && firstInterimAt) ? Math.round(firstInterimAt - speechStartAt) : null;
+        log('stt',
+          '최종 "' + alts[0] + '" (신뢰도 ' + conf.toFixed(2) + ')' +
+          (alts.length > 1 ? ' · 대안: ' + alts.slice(1).join(' / ') : '') +
+          (toFirst != null ? ' · 첫 중간 결과 ' + toFirst + 'ms' : '') +
+          (toFinal != null ? ' · 최종 ' + toFinal + 'ms' : ''),
+          { conf, alts });
+        if (!m && !handled.has(i)) phraseMatch(alts, now);
+        firstInterimAt = 0;
+        updateStats();
+      }
+    }
+  };
+  rec.onerror = ev => {
+    if (ev.error === 'no-speech' || ev.error === 'aborted') { log('info', 'STT: ' + ev.error); return; }
+    stats.errors++;
+    log('error', 'STT 오류: ' + ev.error);
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { recWanted = false; setMic(false); }
+    updateStats();
+  };
+  rec.onend = () => {
+    setMic(false);
+    if (recWanted) {
+      stats.restarts++;
+      log('restart', '인식 세션이 끝나 재시작합니다');
+      updateStats();
+      setTimeout(() => { if (recWanted) { try { rec.start(); } catch (e) { log('error', '재시작 실패: ' + e.message); } } }, 250);
+    }
+  };
+  try { rec.start(); } catch (e) { log('error', '시작 실패: ' + e.message); }
+}
+$('micBtn').onclick = () => {
+  if (recWanted) { recWanted = false; if (rec) rec.stop(); setMic(false); stopMeter(); log('info', '마이크를 껐습니다'); }
+  else { recWanted = true; setMic(false); startRec(); startMeter(); }
+};
+
+/* ---------- 마이크 입력 레벨 ---------- */
+let meter = null, lastDevice = '';
+function setMeterUi() { $('meterBtn').textContent = meter ? '레벨 확인 끄기' : '입력 레벨만 확인'; }
+async function startMeter() {
+  if (meter) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    const track = stream.getAudioTracks()[0];
+    lastDevice = track.label || '이름 없음';
+    $('meterDev').textContent = lastDevice;
+    log('info', '마이크 장치: ' + lastDevice);
+    const m = { stream, ctx, raf: 0, level: 0, quietSince: 0, warned: false };
+    meter = m;
+    setMeterUi();
+    if (ctx.state === 'suspended') ctx.resume();
+    const loop = () => {
+      if (meter !== m) return;
+      an.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / buf.length);
+      const db = rms > 0 ? 20 * Math.log10(rms) : -100;
+      const pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+      m.level = Math.max(pct, m.level - 2);
+      $('meterBar').style.width = m.level + '%';
+      $('meterBar').style.background = m.level > 90 ? 'var(--bad)' : 'var(--ok)';
+      $('meterDb').textContent = db > -100 ? Math.round(db) + ' dB' : '-∞ dB';
+      const now = performance.now();
+      if (db < -55) {
+        if (!m.quietSince) m.quietSince = now;
+        else if (!m.warned && now - m.quietSince > 4000) {
+          m.warned = true;
+          log('warn', '4초 동안 입력 신호가 거의 없습니다. Chrome의 마이크 선택(chrome://settings/content/microphone)과 장치 음소거를 확인하세요');
+        }
+      } else { m.quietSince = 0; m.warned = false; }
+      m.raf = requestAnimationFrame(loop);
+    };
+    loop();
+  } catch (e) {
+    log('error', '마이크 레벨 측정 실패: ' + e.name + ' ' + e.message);
+    setMeterUi();
+  }
+}
+function stopMeter() {
+  if (!meter) return;
+  cancelAnimationFrame(meter.raf);
+  meter.stream.getTracks().forEach(t => t.stop());
+  meter.ctx.close();
+  meter = null;
+  $('meterBar').style.width = '0';
+  $('meterDb').textContent = '-';
+  setMeterUi();
+}
+$('meterBtn').onclick = () => { if (meter) stopMeter(); else startMeter(); };
+
+/* ---------- 로그 내보내기 ---------- */
+$('copyBtn').onclick = async () => {
+  const data = {
+    userAgent: navigator.userAgent,
+    env: $('env').value,
+    micDevice: lastDevice,
+    settings: { stop: $('cmdStop').value, start: $('cmdStart').value, preroll: $('preroll').value, interim: $('interim').checked, gate: $('gate').checked, threshold: $('th').value },
+    stats: { finals: stats.finals, executed: stats.executed, ignored: stats.ignored, restarts: stats.restarts, errors: stats.errors, latAvg: avg(stats.lat), latMax: mx(stats.lat), latSpeechAvg: avg(stats.latSpeech) },
+    log: logEntries
+  };
+  try { await navigator.clipboard.writeText(JSON.stringify(data, null, 2)); log('info', '로그 JSON을 복사했습니다'); }
+  catch (e) { log('error', '복사 실패: ' + e.message); }
+};
+$('clearBtn').onclick = () => { $('log').innerHTML = ''; logEntries.length = 0; };
+
+updateStats();
+})();
+</script>
+</body>
+</html>
