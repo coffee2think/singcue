@@ -37,7 +37,10 @@ main에서 인수 조건을 항목별로 확인한 결과 모두 충족돼 있�
 **자동 검사**
 
 - `npx vitest run src/adapters/storage.test.ts`: 62개 통과(이번에 추가한 3개 포함)
-- 전체 `npm test`·`npm run lint`·`npm run build` 결과는 PR 직전 최신 `origin/main` 반영 뒤 다시 돌려 PR 본문에 적는다
+- PR 직전 `git fetch origin` 뒤 `origin/main`(1aad407)을 merge 시도: 새 커밋이 없어 "Already up to date", 충돌 없음
+- `npm test`: 테스트 파일 28개, 테스트 489개 통과
+- `npm run lint`: 오류 없음
+- `npm run build`: `tsc -b`와 `vite build` 통과
 
 **실제 브라우저 확인** (앱 내 브라우저, `npx vite --port 5291`로 띄운 `http://localhost:5291`)
 
