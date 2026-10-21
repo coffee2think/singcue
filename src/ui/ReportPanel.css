@@ -1,0 +1,109 @@
+.report {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.report__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.report h2 {
+  margin: 0;
+}
+
+.report h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.report button {
+  padding: 4px 12px;
+  font: inherit;
+}
+
+.report__hint,
+.report__empty {
+  margin: 0;
+  font-size: 0.875em;
+  opacity: 0.8;
+}
+
+.report__total {
+  margin: 0;
+}
+
+.report__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.report__table caption {
+  margin-bottom: 8px;
+  font-weight: bold;
+  text-align: left;
+}
+
+.report__table th,
+.report__table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  /* 영상 ID와 구간 이름이 좁은 화면에서 넘치지 않게 한다 */
+  overflow-wrap: anywhere;
+}
+
+.report__table tbody th {
+  font-weight: normal;
+}
+
+.report__number {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.report__table .report__number {
+  text-align: right;
+}
+
+.report__deleted {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.report__day-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report__day {
+  display: grid;
+  grid-template-columns: 6.5em 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.report__date {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 막대 길이는 그날 연습 횟수를 가장 많은 날과 비교한 비율이다 */
+.report__bar {
+  height: 0.75em;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.report__bar span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.6;
+}
