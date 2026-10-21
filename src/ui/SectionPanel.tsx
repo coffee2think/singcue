@@ -1,6 +1,7 @@
 import { createStorage, type SaveResult, type StorageAdapter } from '../adapters/storage.ts';
 import { selectedSection, type SectionNotice } from '../controller/sectionReducer.ts';
 import { useSections } from '../controller/useSections.ts';
+import type { Section } from '../types.ts';
 import { formatTime } from './formatTime.ts';
 
 const defaultStorage = createStorage();
@@ -9,11 +10,13 @@ type Props = {
   videoId: string;
   /** 현재 재생 위치(초). 플레이어가 아직 없으면 null */
   getCurrentTime: () => number | null;
+  /** 목록에서 연습 구간을 고르면 알린다 */
+  onSelect?: (section: Section) => void;
   storage?: StorageAdapter;
 };
 
 /** 시작·끝 마킹과 구간 목록. 영상이 바뀌면 `key={videoId}`로 새로 만든다 */
-export function SectionPanel({ videoId, getCurrentTime, storage = defaultStorage }: Props) {
+export function SectionPanel({ videoId, getCurrentTime, onSelect, storage = defaultStorage }: Props) {
   const { state, saveFailure, dispatch } = useSections(videoId, storage);
   const selected = selectedSection(state);
 
@@ -58,7 +61,10 @@ export function SectionPanel({ videoId, getCurrentTime, storage = defaultStorage
               <button
                 type="button"
                 aria-pressed={section.id === state.selectedId}
-                onClick={() => dispatch({ type: 'select', id: section.id })}
+                onClick={() => {
+                  dispatch({ type: 'select', id: section.id });
+                  onSelect?.(section);
+                }}
               >
                 {section.name} <span>{formatTime(section.start)} ~ {formatTime(section.end)}</span>
               </button>
