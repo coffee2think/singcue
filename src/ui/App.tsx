@@ -2,6 +2,7 @@ import { useCallback, useReducer, useRef, useState } from 'react';
 import type { PlayerAdapter } from '../adapters/playerAdapter/index.ts';
 import { createStorage } from '../adapters/storage.ts';
 import { usePlayback } from '../controller/usePlayback.ts';
+import { useVoice } from '../controller/useVoice.ts';
 import type { Section } from '../types.ts';
 import { LyricMappingPanel } from './LyricMappingPanel.tsx';
 import { PlaybackControls } from './PlaybackControls.tsx';
@@ -9,6 +10,7 @@ import { PlayerView } from './PlayerView.tsx';
 import { SectionPanel } from './SectionPanel.tsx';
 import { SettingsPanel } from './SettingsPanel.tsx';
 import { VideoInputForm } from './VideoInputForm.tsx';
+import { VoicePanel } from './VoicePanel.tsx';
 import {
   initialVideoLoadState,
   videoLoadReducer,
@@ -24,6 +26,7 @@ export function App() {
   const playerRef = useRef<PlayerAdapter | null>(null);
   const playback = usePlayback(playerRef, storage);
   const [section, setSection] = useState<Section | null>(null);
+  const voice = useVoice({ playback, section, storage });
 
   // 플레이어 이벤트를 영상 불러오기 상태와 재생 상태에 함께 반영한다. PlayerView가 효과를 다시 실행하지 않도록 렌더마다 같은 함수로 둔다
   const { onPlayerEvent, unload } = playback;
@@ -80,6 +83,9 @@ export function App() {
           />
         </>
       )}
+
+      {/* 영상 준비 전에도 켤 수 있다. 그때 들어온 명령은 상태 규칙에 따라 무시로 표시한다 */}
+      <VoicePanel voice={voice} />
 
       <SettingsPanel />
     </main>

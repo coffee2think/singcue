@@ -1,0 +1,86 @@
+.voice {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.voice h2 {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+}
+
+.voice__privacy {
+  margin: 0;
+  font-size: 0.875em;
+  opacity: 0.8;
+}
+
+.voice__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice__controls button {
+  padding: 8px 16px;
+  font: inherit;
+}
+
+.voice__level {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice__level meter {
+  flex: 1;
+  min-width: 120px;
+  max-width: 320px;
+  height: 1em;
+}
+
+.voice__db {
+  min-width: 4.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice__heard {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.voice__log {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.voice__entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+}
+
+.voice__outcome {
+  font-weight: bold;
+}
+
+.voice__entry--ignore .voice__outcome {
+  opacity: 0.7;
+}
+
+.voice__text {
+  overflow-wrap: anywhere;
+}
+
+.voice__reason {
+  flex-basis: 100%;
+  font-size: 0.875em;
+  opacity: 0.8;
+}
