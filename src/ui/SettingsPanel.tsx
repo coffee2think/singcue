@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { createStorage, type SaveResult, type StorageAdapter } from '../adapters/storage.ts';
 import { DEFAULT_SETTINGS } from '../core/defaultSettings.ts';
 import type { EndAction, Settings } from '../types.ts';
+import { BackupPanel } from './BackupPanel.tsx';
 import {
   defaultDraft,
   END_ACTION_LABELS,
@@ -63,6 +64,15 @@ export function SettingsPanel({ storage: givenStorage, onChange }: Props) {
     save(result.settings, 'saved');
   }
 
+  // 백업을 불러오면 저장소의 설정이 이미 바뀌었으므로 입력란과 저장된 값만 맞춘다
+  function handleImported(settings: Settings) {
+    setSaved(settings);
+    setDraft(toDraft(settings));
+    setErrors({});
+    setNotice(null);
+    onChange?.(settings);
+  }
+
   function handleReset() {
     const result = readDraft(defaultDraft());
     if (result.ok) save(result.settings, 'reset');
@@ -75,90 +85,94 @@ export function SettingsPanel({ storage: givenStorage, onChange }: Props) {
   });
 
   return (
-    <form className="settings" aria-labelledby="settings-title" onSubmit={handleSubmit} noValidate>
-      <h2 id="settings-title">설정</h2>
+    <>
+      <form className="settings" aria-labelledby="settings-title" onSubmit={handleSubmit} noValidate>
+        <h2 id="settings-title">설정</h2>
 
-      <fieldset>
-        <legend>구간 끝 동작</legend>
-        {END_ACTIONS.map((action) => (
-          <label key={action} className="settings__choice">
-            <input
-              type="radio"
-              name="endAction"
-              value={action}
-              checked={draft.endAction === action}
-              onChange={() => update('endAction', action)}
-            />
-            {END_ACTION_LABELS[action]}
-            {action === DEFAULT_SETTINGS.endAction && ' (기본)'}
-          </label>
-        ))}
-      </fieldset>
+        <fieldset>
+          <legend>구간 끝 동작</legend>
+          {END_ACTIONS.map((action) => (
+            <label key={action} className="settings__choice">
+              <input
+                type="radio"
+                name="endAction"
+                value={action}
+                checked={draft.endAction === action}
+                onChange={() => update('endAction', action)}
+              />
+              {END_ACTION_LABELS[action]}
+              {action === DEFAULT_SETTINGS.endAction && ' (기본)'}
+            </label>
+          ))}
+        </fieldset>
 
-      <div className="settings__field">
-        <label htmlFor="settings-preroll">프리롤(초, 0 이상)</label>
-        <input
-          {...fieldProps('preroll')}
-          type="text"
-          inputMode="decimal"
-          value={draft.preroll}
-          onChange={(event) => update('preroll', event.target.value)}
-        />
-        <p className="settings__hint">구간 시작보다 이만큼 앞에서 재생합니다. 기본 {DEFAULT_SETTINGS.preroll}초</p>
-        <FieldError field="preroll" errors={errors} />
-      </div>
+        <div className="settings__field">
+          <label htmlFor="settings-preroll">프리롤(초, 0 이상)</label>
+          <input
+            {...fieldProps('preroll')}
+            type="text"
+            inputMode="decimal"
+            value={draft.preroll}
+            onChange={(event) => update('preroll', event.target.value)}
+          />
+          <p className="settings__hint">구간 시작보다 이만큼 앞에서 재생합니다. 기본 {DEFAULT_SETTINGS.preroll}초</p>
+          <FieldError field="preroll" errors={errors} />
+        </div>
 
-      <div className="settings__field">
-        <label htmlFor="settings-shortRuleChars">짧은 발화 허용 글자 수(0 이상의 정수)</label>
-        <input
-          {...fieldProps('shortRuleChars')}
-          type="text"
-          inputMode="numeric"
-          value={draft.shortRuleChars}
-          onChange={(event) => update('shortRuleChars', event.target.value)}
-        />
-        <p className="settings__hint">
-          명령어를 뺀 나머지 글자가 이보다 많으면 가사로 보고 무시합니다. 기본 {DEFAULT_SETTINGS.shortRuleChars}자
-        </p>
-        <FieldError field="shortRuleChars" errors={errors} />
-      </div>
+        <div className="settings__field">
+          <label htmlFor="settings-shortRuleChars">짧은 발화 허용 글자 수(0 이상의 정수)</label>
+          <input
+            {...fieldProps('shortRuleChars')}
+            type="text"
+            inputMode="numeric"
+            value={draft.shortRuleChars}
+            onChange={(event) => update('shortRuleChars', event.target.value)}
+          />
+          <p className="settings__hint">
+            명령어를 뺀 나머지 글자가 이보다 많으면 가사로 보고 무시합니다. 기본 {DEFAULT_SETTINGS.shortRuleChars}자
+          </p>
+          <FieldError field="shortRuleChars" errors={errors} />
+        </div>
 
-      <label className="settings__choice">
-        <input
-          type="checkbox"
-          checked={draft.stopOnInterim}
-          onChange={(event) => update('stopOnInterim', event.target.checked)}
-        />
-        정지 즉시 실행(중간 인식 결과로 정지)
-      </label>
+        <label className="settings__choice">
+          <input
+            type="checkbox"
+            checked={draft.stopOnInterim}
+            onChange={(event) => update('stopOnInterim', event.target.checked)}
+          />
+          정지 즉시 실행(중간 인식 결과로 정지)
+        </label>
 
-      <div className="settings__lists">
-        <WordListField
-          field="stopWords"
-          label="정지 명령어"
-          value={draft.stopWords}
-          errors={errors}
-          fieldProps={fieldProps('stopWords')}
-          onChange={(value) => update('stopWords', value)}
-        />
-        <WordListField
-          field="startWords"
-          label="시작 명령어"
-          value={draft.startWords}
-          errors={errors}
-          fieldProps={fieldProps('startWords')}
-          onChange={(value) => update('startWords', value)}
-        />
-      </div>
+        <div className="settings__lists">
+          <WordListField
+            field="stopWords"
+            label="정지 명령어"
+            value={draft.stopWords}
+            errors={errors}
+            fieldProps={fieldProps('stopWords')}
+            onChange={(value) => update('stopWords', value)}
+          />
+          <WordListField
+            field="startWords"
+            label="시작 명령어"
+            value={draft.startWords}
+            errors={errors}
+            fieldProps={fieldProps('startWords')}
+            onChange={(value) => update('startWords', value)}
+          />
+        </div>
 
-      <div className="settings__actions">
-        <button type="submit">저장</button>
-        <button type="button" onClick={handleReset}>
-          기본값으로 되돌리기
-        </button>
-      </div>
-      <SettingsNotice notice={notice} />
-    </form>
+        <div className="settings__actions">
+          <button type="submit">저장</button>
+          <button type="button" onClick={handleReset}>
+            기본값으로 되돌리기
+          </button>
+        </div>
+        <SettingsNotice notice={notice} />
+      </form>
+      {/* 설정 form 안에 두면 버튼이 설정 저장과 섞이므로 형제로 둔다 */}
+      <BackupPanel onImported={(backup) => handleImported(backup.settings)} />
+    </>
   );
 }
 
