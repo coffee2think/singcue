@@ -270,6 +270,57 @@ function filledStore() {
   });
 }
 
+describe('연습 기록 읽기·덧붙이기', () => {
+  const second: PracticeRecord = { videoId: video.videoId, sectionId: 's2', at: '2026-10-21T09:01:00.000Z', seconds: 4 };
+
+  it('기록을 singcue:log 끝에 덧붙이고, 새로 만든 저장소에서도 그대로 읽힌다', () => {
+    const store = memoryStore();
+    expect(createStorage(store).appendLog([record])).toEqual({ ok: true });
+    expect(createStorage(store).appendLog([second])).toEqual({ ok: true });
+
+    // 새로고침과 같은 상황: 같은 저장소로 어댑터를 다시 만든다
+    expect(createStorage(store).loadLog()).toEqual([record, second]);
+    expect(JSON.parse(store.data.get(LOG_KEY)!)).toEqual([record, second]);
+  });
+
+  it('저장된 기록이 없거나 손상되면 빈 목록을 읽는다', () => {
+    expect(createStorage(memoryStore()).loadLog()).toEqual([]);
+    expect(createStorage(memoryStore({ [LOG_KEY]: '[' })).loadLog()).toEqual([]);
+    expect(createStorage(memoryStore({ [LOG_KEY]: '{}' })).loadLog()).toEqual([]);
+    expect(createStorage(null).loadLog()).toEqual([]);
+  });
+
+  it('형식이 틀린 기록은 읽지 않고, 덧붙여 쓸 때도 빼고 쓴다', () => {
+    const store = memoryStore({ [LOG_KEY]: JSON.stringify([record, { videoId: 1 }]) });
+    expect(createStorage(store).loadLog()).toEqual([record]);
+    createStorage(store).appendLog([second]);
+    expect(JSON.parse(store.data.get(LOG_KEY)!)).toEqual([record, second]);
+  });
+
+  it('덧붙일 기록이 없으면 쓰지 않는다', () => {
+    const store = memoryStore();
+    expect(createStorage(store).appendLog([])).toEqual({ ok: true });
+    expect(store.data.has(LOG_KEY)).toBe(false);
+  });
+
+  it('저장 공간이 부족하면 quota-exceeded를 돌려주고 기존 기록은 그대로다', () => {
+    const store = backupStore({ [LOG_KEY]: JSON.stringify([record]) }, 0);
+    const result = createStorage(store).appendLog([second]);
+    expect(result).toMatchObject({ ok: false, reason: 'quota-exceeded' });
+    expect(createStorage(store).loadLog()).toEqual([record]);
+  });
+
+  it('localStorage를 쓸 수 없으면 write-error를 돌려준다', () => {
+    expect(createStorage(null).appendLog([record])).toMatchObject({ ok: false, reason: 'write-error' });
+  });
+
+  it('덧붙인 기록은 JSON 백업 내보내기에 들어간다', () => {
+    const store = backupStore();
+    createStorage(store).appendLog([record, second]);
+    expect(exportBackup(store).log).toEqual([record, second]);
+  });
+});
+
 describe('백업 내보내기', () => {
   it('{ version, settings, videos, log } 형식으로 전체 데이터를 모은다', () => {
     expect(exportBackup(filledStore())).toEqual({

@@ -31,6 +31,7 @@ const validDraft: SettingsDraft = {
   startWords: '가자',
   stopOnInterim: true,
   shortRuleChars: '3',
+  minPracticeSeconds: '5',
 };
 
 describe('parsePreroll', () => {
@@ -103,6 +104,7 @@ describe('toDraft·defaultDraft', () => {
       startWords: '시작\n재생해\n틀어줘\n음악큐',
       stopOnInterim: false,
       shortRuleChars: '2',
+      minPracticeSeconds: '3',
     });
   });
 
@@ -117,6 +119,7 @@ describe('toDraft·defaultDraft', () => {
         startWords: [...DEFAULT_SETTINGS.startWords],
         stopOnInterim: DEFAULT_SETTINGS.stopOnInterim,
         shortRuleChars: DEFAULT_SETTINGS.shortRuleChars,
+        minPracticeSeconds: DEFAULT_SETTINGS.minPracticeSeconds,
       },
     });
   });
@@ -139,17 +142,26 @@ describe('readDraft', () => {
         startWords: ['가자'],
         stopOnInterim: true,
         shortRuleChars: 3,
+        minPracticeSeconds: 5,
       },
     });
   });
 
   it('틀린 항목마다 안내를 돌려준다', () => {
-    const result = readDraft({ ...validDraft, preroll: '-1', shortRuleChars: '1.5', stopWords: ' ', startWords: '' });
+    const result = readDraft({
+      ...validDraft,
+      preroll: '-1',
+      shortRuleChars: '1.5',
+      minPracticeSeconds: '3초',
+      stopWords: ' ',
+      startWords: '',
+    });
     expect(result).toEqual({
       ok: false,
       errors: {
         preroll: SETTINGS_ERROR_MESSAGES.preroll,
         shortRuleChars: SETTINGS_ERROR_MESSAGES.shortRuleChars,
+        minPracticeSeconds: SETTINGS_ERROR_MESSAGES.minPracticeSeconds,
         stopWords: SETTINGS_ERROR_MESSAGES.stopWords,
         startWords: SETTINGS_ERROR_MESSAGES.startWords,
       },
@@ -174,6 +186,22 @@ describe('readDraft', () => {
     const result = readDraft({ ...validDraft, preroll: '0', shortRuleChars: '0' });
     expect(result.ok && [result.settings.preroll, result.settings.shortRuleChars]).toEqual([0, 0]);
   });
+
+  it.each([
+    ['0', 0],
+    ['2.5', 2.5],
+    [' 10 ', 10],
+  ])('최소 재생 시간 %j는 %d초로 읽는다', (text, seconds) => {
+    const result = readDraft({ ...validDraft, minPracticeSeconds: text });
+    expect(result.ok && result.settings.minPracticeSeconds).toBe(seconds);
+  });
+
+  it.each(['', '-1', 'abc', '1e400', '3초'])('최소 재생 시간 %j는 받지 않는다', (text) => {
+    expect(readDraft({ ...validDraft, minPracticeSeconds: text })).toEqual({
+      ok: false,
+      errors: { minPracticeSeconds: SETTINGS_ERROR_MESSAGES.minPracticeSeconds },
+    });
+  });
 });
 
 describe('storage와 함께', () => {
@@ -185,7 +213,8 @@ describe('storage와 함께', () => {
 
     const reloaded = createStorage(store).loadSettings();
     expect(reloaded).toEqual({ ...DEFAULT_SETTINGS, ...result.settings });
-    expect(toDraft(reloaded)).toEqual({ ...validDraft, preroll: '2.5', shortRuleChars: '3' });
+    expect(toDraft(reloaded)).toEqual({ ...validDraft, preroll: '2.5', shortRuleChars: '3', minPracticeSeconds: '5' });
+    expect(reloaded.minPracticeSeconds).toBe(5);
     expect(store.data.has(SETTINGS_KEY)).toBe(true);
   });
 });

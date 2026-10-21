@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { createStorage, type SaveResult, type StorageAdapter } from '../adapters/storage.ts';
+import type { PracticeLogError } from '../controller/usePracticeLog.ts';
 import { DEFAULT_SETTINGS } from '../core/defaultSettings.ts';
 import type { EndAction, Settings } from '../types.ts';
 import { BackupPanel } from './BackupPanel.tsx';
@@ -13,12 +14,16 @@ import {
   type PanelSettings,
   type SettingsDraft,
 } from './settingsForm.ts';
+import './SettingsPanel.css';
 
 type Props = {
   /** 테스트나 상위 컴포넌트가 저장소를 넘길 수 있다. 없으면 localStorage를 쓴다 */
   storage?: StorageAdapter;
   /** 저장에 성공한 설정을 알린다 */
   onChange?: (settings: Settings) => void;
+  /** 연습 기록 저장 실패(usePracticeLog). 있으면 백업 패널 바로 위에 안내하고 JSON 내보내기를 권한다 */
+  practiceLogError?: PracticeLogError | null;
+  onDismissPracticeLogError?: () => void;
 };
 
 type Notice = { kind: 'saved' | 'reset' } | { kind: 'error'; reason: Extract<SaveResult, { ok: false }>['reason'] };
@@ -26,7 +31,12 @@ type Notice = { kind: 'saved' | 'reset' } | { kind: 'error'; reason: Extract<Sav
 const END_ACTIONS = Object.keys(END_ACTION_LABELS) as EndAction[];
 
 /** 설정 패널(PRD F2-7, F2-9). 저장 버튼을 누를 때 입력값을 확인해 `singcue:settings`에 저장한다 */
-export function SettingsPanel({ storage: givenStorage, onChange }: Props) {
+export function SettingsPanel({
+  storage: givenStorage,
+  onChange,
+  practiceLogError = null,
+  onDismissPracticeLogError,
+}: Props) {
   const [storage] = useState(() => givenStorage ?? createStorage());
   const [saved, setSaved] = useState(() => storage.loadSettings());
   const [draft, setDraft] = useState<SettingsDraft>(() => toDraft(saved));
@@ -39,7 +49,7 @@ export function SettingsPanel({ storage: givenStorage, onChange }: Props) {
   }
 
   function save(panel: PanelSettings, kind: 'saved' | 'reset') {
-    // 패널에 없는 항목(유사도 기준, 최소 재생 시간)은 저장된 값을 그대로 둔다
+    // 패널에 없는 항목(유사도 기준)은 저장된 값을 그대로 둔다
     const next: Settings = { ...saved, ...panel };
     const result = storage.saveSettings(next);
     if (!result.ok) {
@@ -134,6 +144,21 @@ export function SettingsPanel({ storage: givenStorage, onChange }: Props) {
           <FieldError field="shortRuleChars" errors={errors} />
         </div>
 
+        <div className="settings__field">
+          <label htmlFor="settings-minPracticeSeconds">연습 1회 최소 재생 시간(초, 0 이상)</label>
+          <input
+            {...fieldProps('minPracticeSeconds')}
+            type="text"
+            inputMode="decimal"
+            value={draft.minPracticeSeconds}
+            onChange={(event) => update('minPracticeSeconds', event.target.value)}
+          />
+          <p className="settings__hint">
+            구간을 이 시간 이상 재생해야 연습 1회로 기록합니다. 기본 {DEFAULT_SETTINGS.minPracticeSeconds}초
+          </p>
+          <FieldError field="minPracticeSeconds" errors={errors} />
+        </div>
+
         <label className="settings__choice">
           <input
             type="checkbox"
@@ -170,6 +195,7 @@ export function SettingsPanel({ storage: givenStorage, onChange }: Props) {
         </div>
         <SettingsNotice notice={notice} />
       </form>
+      <PracticeLogNotice error={practiceLogError} onDismiss={onDismissPracticeLogError} />
       {/* 설정 form 안에 두면 버튼이 설정 저장과 섞이므로 형제로 둔다 */}
       <BackupPanel onImported={(backup) => handleImported(backup.settings)} />
     </>
@@ -209,6 +235,27 @@ function FieldError({ field, errors }: { field: DraftField; errors: DraftErrors 
     <p id={`settings-${field}-error`} className="message message--error" role="alert">
       {message}
     </p>
+  );
+}
+
+/** 연습 기록 저장 실패 안내. 바로 아래 백업 패널의 JSON 내보내기를 권한다(기술 설계 문서 "오류 처리"의 저장 공간 부족) */
+function PracticeLogNotice({ error, onDismiss }: { error: PracticeLogError | null; onDismiss?: () => void }) {
+  if (!error) return null;
+  return (
+    <div className="message message--error practice-log-error" role="alert">
+      <p>
+        {error === 'quota-exceeded'
+          ? '저장 공간이 부족해 연습 기록을 저장하지 못했습니다.'
+          : '브라우저 저장소에 쓸 수 없어 연습 기록을 저장하지 못했습니다.'}{' '}
+        저장하지 못한 기록은 다음 기록과 함께 다시 저장하지만, 새로고침하면 사라집니다. 아래 백업의 "JSON 내보내기"로
+        지금까지의 기록을 파일로 남겨 두세요.
+      </p>
+      {onDismiss && (
+        <button type="button" onClick={onDismiss}>
+          닫기
+        </button>
+      )}
+    </div>
   );
 }
 

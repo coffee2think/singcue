@@ -2,6 +2,7 @@ import { useCallback, useReducer, useRef, useState } from 'react';
 import type { PlayerAdapter } from '../adapters/playerAdapter/index.ts';
 import { createStorage } from '../adapters/storage.ts';
 import { usePlayback } from '../controller/usePlayback.ts';
+import { usePracticeLog } from '../controller/usePracticeLog.ts';
 import { useVoice } from '../controller/useVoice.ts';
 import type { Section } from '../types.ts';
 import { LyricMappingPanel } from './LyricMappingPanel.tsx';
@@ -33,6 +34,12 @@ export function App() {
     // 구절은 정지 상태에서만 받으므로 준비된 영상의 가사 매핑과 비교한다
     videoId: video.status === 'ready' ? video.request.videoId : null,
     getCurrentTime,
+    storage,
+  });
+  const practiceLog = usePracticeLog({
+    playback,
+    videoId: video.status === 'ready' ? video.request.videoId : null,
+    section,
     storage,
   });
 
@@ -95,7 +102,7 @@ export function App() {
       {/* 영상 준비 전에도 켤 수 있다. 그때 들어온 명령은 상태 규칙에 따라 무시로 표시한다 */}
       <VoicePanel voice={voice} />
 
-      <SettingsPanel />
+      <SettingsPanel practiceLogError={practiceLog.error} onDismissPracticeLogError={practiceLog.dismissError} />
     </main>
   );
 }
