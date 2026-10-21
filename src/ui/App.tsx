@@ -26,7 +26,15 @@ export function App() {
   const playerRef = useRef<PlayerAdapter | null>(null);
   const playback = usePlayback(playerRef, storage);
   const [section, setSection] = useState<Section | null>(null);
-  const voice = useVoice({ playback, section, storage });
+  const getCurrentTime = () => playerRef.current?.getCurrentTime() ?? null;
+  const voice = useVoice({
+    playback,
+    section,
+    // 구절은 정지 상태에서만 받으므로 준비된 영상의 가사 매핑과 비교한다
+    videoId: video.status === 'ready' ? video.request.videoId : null,
+    getCurrentTime,
+    storage,
+  });
 
   // 플레이어 이벤트를 영상 불러오기 상태와 재생 상태에 함께 반영한다. PlayerView가 효과를 다시 실행하지 않도록 렌더마다 같은 함수로 둔다
   const { onPlayerEvent, unload } = playback;
@@ -72,14 +80,14 @@ export function App() {
           <SectionPanel
             key={video.request.videoId}
             videoId={video.request.videoId}
-            getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
+            getCurrentTime={getCurrentTime}
             onSelect={setSection}
           />
           <LyricMappingPanel
             // 같은 부모의 SectionPanel과 key가 겹치지 않게 앞에 구분자를 붙인다
             key={`lyrics:${video.request.videoId}`}
             videoId={video.request.videoId}
-            getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
+            getCurrentTime={getCurrentTime}
           />
         </>
       )}

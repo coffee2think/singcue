@@ -6,9 +6,11 @@ import type { PlaybackState, Section, Settings } from '../types.ts';
 import {
   SECTION_END_CHECK_MS,
   canPlay,
+  canPlayAt,
   canStop,
   checkSectionEnd,
   crossedSectionEnd,
+  playFrom,
   playSection,
   startSectionEndWatch,
   toMachineEvent,
@@ -69,6 +71,28 @@ describe('canPlay / canStop', () => {
     expect(canStop('playing')).toBe(true);
     expect(canStop('stopped')).toBe(false);
     expect(canStop('unready')).toBe(false);
+  });
+});
+
+describe('canPlayAt', () => {
+  it('플레이어가 준비됐으면 구간을 고르지 않아도 임의 위치에서 재생할 수 있다', () => {
+    expect(canPlayAt('unready')).toBe(false);
+    expect(canPlayAt('stopped')).toBe(true);
+    expect(canPlayAt('playing')).toBe(true);
+  });
+});
+
+describe('playFrom', () => {
+  it('주어진 위치에서 프리롤만큼 앞으로 옮긴 뒤 재생한다', () => {
+    const player = fakePlayer();
+    expect(playFrom(player, 42, 1.5)).toBe(40.5);
+    expect(player.calls).toEqual(['seekTo:40.5', 'play']);
+  });
+
+  it('0초보다 앞이면 0초에서 재생한다', () => {
+    const player = fakePlayer();
+    expect(playFrom(player, 1, 1.5)).toBe(0);
+    expect(player.calls).toEqual(['seekTo:0', 'play']);
   });
 });
 

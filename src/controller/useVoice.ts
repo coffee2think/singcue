@@ -1,6 +1,7 @@
 // 음성 제어 훅. PRD F2-1~F2-6, 기술 설계 문서의 "음성 명령 처리 흐름"과 "오류 처리"를 따른다.
 // speechAdapter의 인식 결과를 commandMatcher.decide()로 판별하고, 그 결과만 따라 usePlayback의 재생·정지를 부른다.
 // 실행한 명령은 인식 결과를 받은 뒤 재생 상태가 바뀔 때까지 걸린 시간을 잰다(PRD F2-6).
+// 구절 판별 결과는 phraseMatcher.matchPhrase()로 가사 매핑과 비교해 다음 구절 위치로 이동한다(PRD F4-1~F4-5).
 
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { MIN_DB, startMicMeter, type MicEvent, type MicMeter } from '../adapters/micMeter/index.ts';
@@ -14,7 +15,8 @@ import {
 } from '../adapters/speechAdapter/index.ts';
 import type { StorageAdapter } from '../adapters/storage.ts';
 import { DEBOUNCE_MS, decide } from '../core/commandMatcher.ts';
-import type { Decision, IgnoreReason, PlaybackState, Section, Settings } from '../types.ts';
+import { matchPhrase } from '../core/phraseMatcher.ts';
+import type { Decision, IgnoreReason, PlaybackState, Section, Settings, VideoData } from '../types.ts';
 import type { UsePlayback } from './usePlayback.ts';
 
 /** 시작 명령 후 이 시간(ms) 안에 재생 상태가 되지 않으면 자동재생 차단 가능성을 안내한다(PRD F2-3) */
@@ -58,6 +60,33 @@ export type VoiceLogEntry = {
   source: ResultSource;
   /** 실행한 명령의 반응 시간. 아직 상태가 바뀌지 않았거나 재지 못했으면 null */
   latency: Latency | null;
+  /** 구절 매칭 결과. 구절로 판별한 기록에만 있다 */
+  phrase?: PhraseOutcome;
+};
+
+/**
+ * 구절 매칭 결과를 이동 여부로 나눈 것(PRD F4-1~F4-3).
+ * - jump: 기준 이상이라 `target`(다음 구절 시작 또는 `endT`)으로 이동한다. `from`은 프리롤을 뺀 실제 재생 위치이고, 재생하기 전이면 null
+ * - below: 기준 미만이라 이동하지 않는다. 가장 가까운 구절과 점수를 보여 주고 다시 말하도록 안내한다
+ * - no-next: 마지막 구절인데 `endT`가 없어 이동하지 않는다
+ * - no-lines: 이 영상에 가사 매핑이 없다
+ */
+export type PhraseOutcome =
+  | (PhraseMatch & { kind: 'jump'; target: number; from: number | null })
+  | (PhraseMatch & { kind: 'below' | 'no-next' })
+  | { kind: 'no-lines' };
+
+type PhraseMatch = {
+  /** 가장 비슷한 구절의 순서(0부터) */
+  lineIndex: number;
+  /** 가장 비슷한 구절의 가사 */
+  text: string;
+  /** 마지막 구절인지 */
+  last: boolean;
+  /** 0~1 */
+  score: number;
+  /** 매칭에 쓴 유사도 기준 */
+  threshold: number;
 };
 
 export type VoiceState = {
@@ -251,7 +280,45 @@ export function ignoreReasonText(reason: IgnoreReason, state: PlaybackState, sho
 }
 
 export const NO_SECTION_REASON = '연습할 구간을 고르지 않아 재생하지 않았습니다';
-export const PHRASE_REASON = '구절 인식 점프는 아직 지원하지 않습니다';
+
+/**
+ * 인식 후보를 가사 매핑과 비교해 이동 여부를 정한다. 순수 함수다.
+ * @param hint 매칭 시점의 재생 위치(초). 같은 점수의 반복 구절 중 하나를 고르는 데 쓴다(#20 결정)
+ */
+export function resolvePhrase(
+  candidates: readonly string[],
+  video: Pick<VideoData, 'lines' | 'endT'>,
+  threshold: number,
+  hint: number | null,
+): PhraseOutcome {
+  const match = matchPhrase(candidates, video.lines, video.endT, threshold, hint);
+  // decide가 빈 후보를 구절로 넘기지 않으므로, 줄을 고르지 못했으면 가사 매핑이 없는 경우다
+  if (match.lineIndex < 0) return { kind: 'no-lines' };
+  const base: PhraseMatch = {
+    lineIndex: match.lineIndex,
+    text: video.lines[match.lineIndex].text,
+    last: match.lineIndex === video.lines.length - 1,
+    score: match.score,
+    threshold,
+  };
+  if (!match.passed) return { ...base, kind: 'below' };
+  if (match.seekTo === null) return { ...base, kind: 'no-next' };
+  return { ...base, kind: 'jump', target: match.seekTo, from: null };
+}
+
+/** 구절로 이동하지 않은 이유. 이동했으면 null이다 */
+export function phraseReasonText(outcome: PhraseOutcome): string | null {
+  switch (outcome.kind) {
+    case 'jump':
+      return outcome.from === null ? '플레이어가 준비되지 않아 재생하지 못했습니다' : null;
+    case 'below':
+      return `유사도가 기준(${outcome.threshold.toFixed(2)})보다 낮아 이동하지 않았습니다. 구절을 다시 말해 주세요`;
+    case 'no-next':
+      return '마지막 구절이지만 "마지막 구절 다음 위치"가 없어 이동하지 않았습니다. 가사 매핑에서 다음 위치를 찍어 주세요';
+    case 'no-lines':
+      return '이 영상에 가사 매핑이 없어 구절로 이동할 수 없습니다. 가사 매핑을 먼저 입력해 주세요';
+  }
+}
 
 /** 자동재생 차단 안내를 보일지. 시작 명령 후 시간이 지났고 아직 재생 상태가 아닐 때만 보인다 */
 export function isAutoplayBlocked(
@@ -271,17 +338,22 @@ export type UseVoice = VoiceState & {
 };
 
 type Options = {
-  playback: Pick<UsePlayback, 'state' | 'play' | 'stop'>;
+  playback: Pick<UsePlayback, 'state' | 'play' | 'playAt' | 'stop'>;
   /** 시작 명령으로 재생할 연습 구간 */
   section: Section | null;
+  /** 구절과 비교할 가사 매핑의 영상. 영상이 준비되지 않았으면 null */
+  videoId: string | null;
+  /** 플레이어 현재 위치(초). 구절 매칭의 힌트로 쓴다. 플레이어가 없으면 null */
+  getCurrentTime: () => number | null;
   storage: StorageAdapter;
 };
 
 /**
- * 설정은 인식 결과가 올 때마다 `singcue:settings`에서 읽는다. 설정 패널에서 저장한 명령어가 바로 반영된다.
+ * 설정은 인식 결과가 올 때마다 `singcue:settings`에서 읽는다. 설정 패널에서 저장한 명령어·유사도 기준이 바로 반영된다.
+ * 가사 매핑도 구절을 판별할 때마다 `singcue:video:<videoId>`에서 읽어, 가사 매핑 화면에서 고친 내용이 바로 반영된다.
  * 마이크 측정기는 장치 이름과 입력 레벨을 보여 주는 데만 쓰고, 인식은 speechAdapter가 따로 마이크를 연다.
  */
-export function useVoice({ playback, section, storage }: Options): UseVoice {
+export function useVoice({ playback, section, videoId, getCurrentTime, storage }: Options): UseVoice {
   const [voice, dispatch] = useReducer(voiceReducer, INITIAL_VOICE_STATE);
   const [supported] = useState(isSpeechSupported);
   const speechRef = useRef<SpeechAdapter | null>(null);
@@ -343,10 +415,10 @@ export function useVoice({ playback, section, storage }: Options): UseVoice {
 
     const entryId = `${result.utteranceId}:${now}`;
     const source: ResultSource = result.isFinal ? 'final' : 'interim';
-    const entry = (outcome: VoiceLogEntry['outcome'], reason: string | null) =>
+    const entry = (outcome: VoiceLogEntry['outcome'], reason: string | null, phrase?: PhraseOutcome) =>
       dispatch({
         type: 'log',
-        entry: { id: entryId, text: result.candidates[0], outcome, reason, source, latency: null },
+        entry: { id: entryId, text: result.candidates[0], outcome, reason, source, latency: null, phrase },
       });
 
     switch (decision.action) {
@@ -376,9 +448,23 @@ export function useVoice({ playback, section, storage }: Options): UseVoice {
         }
         return;
       }
-      case 'phrase':
-        entry('phrase', PHRASE_REASON);
+      case 'phrase': {
+        // 영상이 준비되지 않았으면 decide가 상태로 무시하므로 여기서는 videoId가 있다
+        const video = videoId === null ? { lines: [], endT: null } : storage.loadVideo(videoId);
+        const outcome = resolvePhrase(decision.candidates, video, settings.similarityThreshold, getCurrentTime());
+        if (outcome.kind === 'jump') {
+          // 이동하지 못한 구절은 바로 다시 말할 수 있도록, 이동했을 때만 명령으로 센다
+          outcome.from = playback.playAt(outcome.target);
+          if (outcome.from !== null) {
+            handledRef.current.add(result.utteranceId);
+            lastCommandAtRef.current = now;
+            setStartRequest((current) => (current ?? 0) + 1);
+            setTimedOutRequest(null);
+          }
+        }
+        entry('phrase', phraseReasonText(outcome), outcome);
         return;
+      }
       case 'ignore':
         entry('ignore', ignoreReasonText(decision.reason, state, settings.shortRuleChars));
         return;

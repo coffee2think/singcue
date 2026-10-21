@@ -35,10 +35,23 @@ export function canStop(state: PlaybackState): boolean {
  * 재생 중에 눌러도 구간 처음부터 다시 재생한다. 상태는 플레이어 이벤트로 바뀌므로 여기서 바꾸지 않는다.
  */
 export function playSection(player: Pick<PlayerAdapter, 'seekTo' | 'play'>, section: Section, preroll: number): number {
-  const from = prerollStart(section.start, preroll);
+  return playFrom(player, section.start, preroll);
+}
+
+/**
+ * 임의 위치(초)에서 프리롤만큼 앞으로 옮긴 뒤 재생한다. 옮긴 위치(초)를 돌려준다.
+ * 구절 인식 점프(PRD F4-1, F4-3)가 `matchPhrase`의 `seekTo`를 넘긴다. `seekTo`는 프리롤을 빼기 전 위치다(#21).
+ */
+export function playFrom(player: Pick<PlayerAdapter, 'seekTo' | 'play'>, at: number, preroll: number): number {
+  const from = prerollStart(at, preroll);
   player.seekTo(from);
   player.play();
   return from;
+}
+
+/** 임의 위치에서 재생할 수 있는지. 플레이어가 준비됐으면 구간을 고르지 않아도 된다 */
+export function canPlayAt(state: PlaybackState): boolean {
+  return state !== 'unready';
 }
 
 /** 구간 끝 확인 간격(ms). 기술 설계 문서의 "구간 끝 감지"(0.25초)로, PRD F2-8의 "1초 이내"를 만족한다 */
