@@ -443,3 +443,44 @@ describe('백업 불러오기', () => {
     expect(target.data.has('extra')).toBe(false);
   });
 });
+
+describe('연습 기록 백업 왕복(PRD F5-4)', () => {
+  const records: PracticeRecord[] = [
+    record,
+    { videoId: video.videoId, sectionId: 's2', at: '2026-10-21T09:01:00.000Z', seconds: 4 },
+    { videoId: otherVideo.videoId, sectionId: 'o1', at: '2026-10-22T20:15:30.000Z', seconds: 31.25 },
+  ];
+
+  it('기록을 쌓아 내보내고, 사이트 데이터를 지운 뒤 불러오면 같은 기록이 돌아오고 이어서 쌓인다', () => {
+    const store = backupStore({ [videoKey(video.videoId)]: JSON.stringify(video) });
+    expect(createStorage(store).appendLog(records)).toEqual({ ok: true });
+    const text = serializeBackup(exportBackup(store));
+
+    // 사이트 데이터 삭제와 같은 상황: 모든 키를 지운다
+    store.data.clear();
+    expect(createStorage(store).loadLog()).toEqual([]);
+
+    expect(importBackup(text, store)).toMatchObject({ ok: true, backup: { log: records } });
+    expect(createStorage(store).loadLog()).toEqual(records);
+
+    const next: PracticeRecord = { videoId: video.videoId, sectionId: 's1', at: '2026-10-23T08:00:00.000Z', seconds: 6 };
+    expect(createStorage(store).appendLog([next])).toEqual({ ok: true });
+    expect(createStorage(store).loadLog()).toEqual([...records, next]);
+  });
+
+  it('불러오기는 기록을 합치지 않고 파일 내용으로 바꾼다', () => {
+    const text = serializeBackup({ version: 1, settings: DEFAULT_SETTINGS, videos: [], log: [records[2]] });
+    const store = backupStore({ [LOG_KEY]: JSON.stringify(records.slice(0, 2)) });
+
+    expect(importBackup(text, store)).toMatchObject({ ok: true });
+    expect(createStorage(store).loadLog()).toEqual([records[2]]);
+  });
+
+  it('형식이 틀린 파일을 불러오면 기존 기록은 그대로다', () => {
+    const store = backupStore({ [LOG_KEY]: JSON.stringify(records) });
+    const broken = JSON.stringify({ version: 1, settings: DEFAULT_SETTINGS, videos: [], log: [{ ...record, at: 0 }] });
+
+    expect(importBackup(broken, store)).toEqual({ ok: false, reason: 'invalid-format' });
+    expect(createStorage(store).loadLog()).toEqual(records);
+  });
+});

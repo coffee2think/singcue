@@ -6,6 +6,7 @@ import {
   overlappingWords,
   parsePreroll,
   parseShortRuleChars,
+  parseSimilarityThreshold,
   parseWordList,
   readDraft,
   SETTINGS_ERROR_MESSAGES,
@@ -31,6 +32,7 @@ const validDraft: SettingsDraft = {
   startWords: '가자',
   stopOnInterim: true,
   shortRuleChars: '3',
+  similarityThreshold: '0.7',
   minPracticeSeconds: '5',
 };
 
@@ -64,6 +66,22 @@ describe('parseShortRuleChars', () => {
 
   it.each(['', '-1', '1.5', '2.0', '1e2', 'abc', '두', '9'.repeat(20)])('"%s"는 받지 않는다', (text) => {
     expect(parseShortRuleChars(text)).toBeNull();
+  });
+});
+
+describe('parseSimilarityThreshold', () => {
+  it.each([
+    ['0', 0],
+    ['0.5', 0.5],
+    ['.85', 0.85],
+    [' 1 ', 1],
+    ['1.0', 1],
+  ])('"%s"는 %d', (text, value) => {
+    expect(parseSimilarityThreshold(text)).toBe(value);
+  });
+
+  it.each(['', '-0.1', '1.01', '1.5', '2', '50%', '1e-1', 'abc', '0,5', 'NaN'])('"%s"는 받지 않는다', (text) => {
+    expect(parseSimilarityThreshold(text)).toBeNull();
   });
 });
 
@@ -104,6 +122,7 @@ describe('toDraft·defaultDraft', () => {
       startWords: '시작\n재생해\n틀어줘\n음악큐',
       stopOnInterim: false,
       shortRuleChars: '2',
+      similarityThreshold: '0.5',
       minPracticeSeconds: '3',
     });
   });
@@ -119,6 +138,7 @@ describe('toDraft·defaultDraft', () => {
         startWords: [...DEFAULT_SETTINGS.startWords],
         stopOnInterim: DEFAULT_SETTINGS.stopOnInterim,
         shortRuleChars: DEFAULT_SETTINGS.shortRuleChars,
+        similarityThreshold: 0.5,
         minPracticeSeconds: DEFAULT_SETTINGS.minPracticeSeconds,
       },
     });
@@ -142,6 +162,7 @@ describe('readDraft', () => {
         startWords: ['가자'],
         stopOnInterim: true,
         shortRuleChars: 3,
+        similarityThreshold: 0.7,
         minPracticeSeconds: 5,
       },
     });
@@ -152,6 +173,7 @@ describe('readDraft', () => {
       ...validDraft,
       preroll: '-1',
       shortRuleChars: '1.5',
+      similarityThreshold: '1.5',
       minPracticeSeconds: '3초',
       stopWords: ' ',
       startWords: '',
@@ -161,6 +183,7 @@ describe('readDraft', () => {
       errors: {
         preroll: SETTINGS_ERROR_MESSAGES.preroll,
         shortRuleChars: SETTINGS_ERROR_MESSAGES.shortRuleChars,
+        similarityThreshold: SETTINGS_ERROR_MESSAGES.similarityThreshold,
         minPracticeSeconds: SETTINGS_ERROR_MESSAGES.minPracticeSeconds,
         stopWords: SETTINGS_ERROR_MESSAGES.stopWords,
         startWords: SETTINGS_ERROR_MESSAGES.startWords,
@@ -202,9 +225,35 @@ describe('readDraft', () => {
       errors: { minPracticeSeconds: SETTINGS_ERROR_MESSAGES.minPracticeSeconds },
     });
   });
+
+  it.each([
+    ['0', 0],
+    ['1', 1],
+    ['0.85', 0.85],
+  ])('유사도 기준 %j는 %d로 읽는다(양 끝 포함)', (text, threshold) => {
+    const result = readDraft({ ...validDraft, similarityThreshold: text });
+    expect(result.ok && result.settings.similarityThreshold).toBe(threshold);
+  });
+
+  it.each(['', '-0.1', '1.1', '0.5점'])('유사도 기준 %j는 받지 않는다', (text) => {
+    expect(readDraft({ ...validDraft, similarityThreshold: text })).toEqual({
+      ok: false,
+      errors: { similarityThreshold: SETTINGS_ERROR_MESSAGES.similarityThreshold },
+    });
+  });
 });
 
 describe('storage와 함께', () => {
+  it('유사도 기준만 바꿔 저장하면 다른 설정은 그대로이고 새로고침 뒤에도 남는다', () => {
+    const store = memoryStore();
+    const result = readDraft({ ...defaultDraft(), similarityThreshold: '0.8' });
+    if (!result.ok) throw new Error('입력이 틀림');
+    createStorage(store).saveSettings({ ...DEFAULT_SETTINGS, ...result.settings });
+
+    expect(createStorage(store).loadSettings()).toEqual({ ...DEFAULT_SETTINGS, similarityThreshold: 0.8 });
+  });
+
+
   it('저장한 설정은 새 어댑터(새로고침)로 읽어도 그대로다', () => {
     const store = memoryStore();
     const result = readDraft(validDraft);
@@ -213,8 +262,9 @@ describe('storage와 함께', () => {
 
     const reloaded = createStorage(store).loadSettings();
     expect(reloaded).toEqual({ ...DEFAULT_SETTINGS, ...result.settings });
-    expect(toDraft(reloaded)).toEqual({ ...validDraft, preroll: '2.5', shortRuleChars: '3', minPracticeSeconds: '5' });
+    expect(toDraft(reloaded)).toEqual(validDraft);
     expect(reloaded.minPracticeSeconds).toBe(5);
+    expect(reloaded.similarityThreshold).toBe(0.7);
     expect(store.data.has(SETTINGS_KEY)).toBe(true);
   });
 });
