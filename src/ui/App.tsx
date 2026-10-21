@@ -2,6 +2,7 @@ import { useReducer, useRef } from 'react';
 import type { PlayerAdapter } from '../adapters/playerAdapter/index.ts';
 import { PlayerView } from './PlayerView.tsx';
 import { SectionPanel } from './SectionPanel.tsx';
+import { SettingsPanel } from './SettingsPanel.tsx';
 import { VideoInputForm } from './VideoInputForm.tsx';
 import { initialVideoLoadState, videoLoadReducer, type VideoLoadState } from './videoLoadState.ts';
 import './app.css';
@@ -35,6 +36,8 @@ export function App() {
           getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
         />
       )}
+
+      <SettingsPanel />
     </main>
   );
 }
