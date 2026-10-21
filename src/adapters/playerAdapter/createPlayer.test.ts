@@ -101,6 +101,131 @@ describe('createPlayer', () => {
     ]);
   });
 
+  // #53: 이동 직후 버퍼링 중에 pauseVideo를 보내면 실제 YouTube는 버퍼링(3)에 머문 채 일시정지(2)를 보내지 않는다.
+  // 가짜 플레이어는 pauseVideo에 아무 이벤트도 보내지 않아 그 동작을 흉내 낸다.
+  describe('버퍼링 중 정지 요청(#53)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** 재생 중에 위치를 옮겨 버퍼링에 들어간 상태 */
+    async function setupBuffering() {
+      const ctx = await setup();
+      ctx.fire.state(1);
+      ctx.adapter.seekTo(30);
+      ctx.adapter.play();
+      ctx.fire.state(3);
+      ctx.events.length = 0;
+      return ctx;
+    }
+
+    it('버퍼링 중 pause 뒤 일시정지 이벤트가 오지 않으면 0.5초 뒤 정지를 한 번 알린다', async () => {
+      const { PAUSE_STUCK_MS } = await import('./createPlayer.ts');
+      const { adapter, events, player } = await setupBuffering();
+
+      adapter.pause();
+      expect(player.pauseVideo).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(PAUSE_STUCK_MS - 1);
+      expect(events).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(events).toEqual([{ type: 'stateChange', status: 'stopped' }]);
+
+      // 정지 버튼을 다시 눌러도 정지를 또 알리지 않는다
+      adapter.pause();
+      vi.advanceTimersByTime(PAUSE_STUCK_MS);
+      expect(events).toHaveLength(1);
+      expect(PAUSE_STUCK_MS).toBeLessThan(1000);
+    });
+
+    it('대신 정지를 알린 뒤 재생하면 재생 중을 다시 알린다', async () => {
+      const { adapter, events, fire } = await setupBuffering();
+      adapter.pause();
+      vi.advanceTimersByTime(500);
+
+      adapter.play();
+      fire.state(1);
+
+      expect(events).toEqual([
+        { type: 'stateChange', status: 'stopped' },
+        { type: 'stateChange', status: 'playing' },
+      ]);
+    });
+
+    it('버퍼링이 먼저 끝나 실제 일시정지가 오면 그 이벤트만 알린다', async () => {
+      const { adapter, events, fire } = await setupBuffering();
+
+      adapter.pause();
+      fire.state(1); // 실제 기록: 3, 1, 2 순서로 온다
+      fire.state(2);
+      vi.advanceTimersByTime(500);
+
+      expect(events).toEqual([{ type: 'stateChange', status: 'stopped' }]);
+    });
+
+    it('정지 요청 뒤 버퍼링이 다시 와도 0.5초 기준을 지킨다', async () => {
+      const { adapter, events, fire } = await setupBuffering();
+
+      adapter.pause();
+      vi.advanceTimersByTime(300);
+      fire.state(3);
+      vi.advanceTimersByTime(200);
+
+      expect(events).toEqual([{ type: 'stateChange', status: 'stopped' }]);
+    });
+
+    it('pause 뒤 0.5초 안에 다시 재생하면 정지를 알리지 않는다', async () => {
+      const { adapter, events } = await setupBuffering();
+
+      adapter.pause();
+      vi.advanceTimersByTime(200);
+      adapter.play();
+      vi.advanceTimersByTime(1000);
+
+      expect(events).toEqual([]);
+    });
+
+    it('처음 재생 중 시작 전(-1)에 머문 채 pause에 답이 없어도 0.5초 뒤 정지를 알린다', async () => {
+      const { adapter, events, fire } = await setup();
+      events.length = 0;
+
+      adapter.play();
+      [-1, 3, -1].forEach(fire.state); // 실제 기록: 처음 재생 순서 중간에 멈춘 경우
+      adapter.pause();
+      vi.advanceTimersByTime(500);
+
+      expect(events).toEqual([
+        { type: 'stateChange', status: 'playing' },
+        { type: 'stateChange', status: 'stopped' },
+      ]);
+    });
+
+    it('정지 요청이 없는 버퍼링은 오래 이어져도 재생 중이다', async () => {
+      const { events, fire } = await setup();
+      events.length = 0;
+
+      fire.state(3);
+      vi.advanceTimersByTime(10_000);
+
+      expect(events).toEqual([{ type: 'stateChange', status: 'playing' }]);
+    });
+
+    it('재생 중(버퍼링 아님)에 pause하면 타이머 없이 실제 일시정지 이벤트를 기다린다', async () => {
+      const { adapter, events, fire } = await setup();
+      fire.state(1);
+      events.length = 0;
+
+      adapter.pause();
+      vi.advanceTimersByTime(10_000);
+      expect(events).toEqual([]);
+
+      fire.state(2);
+      expect(events).toEqual([{ type: 'stateChange', status: 'stopped' }]);
+    });
+  });
+
   it('onError 코드를 안내 문구와 함께 전달한다', async () => {
     const { events, fire } = await setup();
     events.length = 0;
