@@ -1,5 +1,6 @@
 import { useReducer, useRef } from 'react';
 import type { PlayerAdapter } from '../adapters/playerAdapter/index.ts';
+import { LyricMappingPanel } from './LyricMappingPanel.tsx';
 import { PlayerView } from './PlayerView.tsx';
 import { SectionPanel } from './SectionPanel.tsx';
 import { SettingsPanel } from './SettingsPanel.tsx';
@@ -32,6 +33,15 @@ export function App() {
       {video.status === 'ready' && (
         <SectionPanel
           key={video.request.videoId}
+          videoId={video.request.videoId}
+          getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
+        />
+      )}
+
+      {video.status === 'ready' && (
+        <LyricMappingPanel
+          // 같은 부모의 SectionPanel과 key가 겹치지 않게 앞에 구분자를 붙인다
+          key={`lyrics:${video.request.videoId}`}
           videoId={video.request.videoId}
           getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
         />
