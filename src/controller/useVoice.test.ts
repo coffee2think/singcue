@@ -4,11 +4,17 @@ import { DEFAULT_SETTINGS } from '../core/defaultSettings.ts';
 import type { PlaybackState } from '../types.ts';
 import {
   INITIAL_VOICE_STATE,
+  LATENCY_TIMEOUT_MS,
+  MAX_LATENCY_RECORDS,
   MAX_LOG_ENTRIES,
   ignoreReasonText,
   isAutoplayBlocked,
   judgeResult,
+  measureLatency,
+  summarizeLatencies,
   voiceReducer,
+  type LatencyRecord,
+  type PendingLatency,
   type VoiceLogEntry,
   type VoiceState,
 } from './useVoice.ts';
@@ -58,6 +64,25 @@ describe('judgeResult', () => {
     // 시작·무시는 최종 결과를 기다린다
     expect(judgeResult(result(['시작'], false), input('stopped', { settings }))).toBeNull();
     expect(judgeResult(result(['멈춰 보면 알 거야'], false), input('playing', { settings }))).toBeNull();
+  });
+
+  it('정지 즉시 실행이 켜져 있으면 같은 발화의 중간·최종 결과 중 처음 정지 명령에서 한 번만 실행한다', () => {
+    // useVoice가 하는 것처럼 실행한 발화 ID를 기억하며 같은 발화의 결과를 차례로 넣는다
+    const settings = { ...DEFAULT_SETTINGS, stopOnInterim: true };
+    const handled = new Set<string>();
+    const sequence = [result(['멈'], false), result(['멈춰'], false), result(['멈춰'], false), result(['멈춰'], true)];
+    const decisions = sequence.map((item) => {
+      const decision = judgeResult(item, input('playing', { settings, handled }));
+      if (decision?.action === 'stop') handled.add(item.utteranceId);
+      return decision?.action ?? null;
+    });
+    // 명령이 아직 덜 들린 중간 결과는 무시로 기록하지 않고 넘어간다
+    expect(decisions).toEqual([null, 'stop', null, null]);
+  });
+
+  it('정지 즉시 실행이 꺼져 있으면 같은 발화의 최종 결과에서만 실행한다', () => {
+    const sequence = [result(['멈춰'], false), result(['멈춰'], false), result(['멈춰'], true)];
+    expect(sequence.map((item) => judgeResult(item, input('playing'))?.action ?? null)).toEqual([null, null, 'stop']);
   });
 
   it('이미 명령을 실행한 발화의 뒤따르는 결과는 보지 않는다', () => {
@@ -143,10 +168,88 @@ describe('voiceReducer', () => {
   it('판별 기록은 새것을 앞에 두고 최대 개수만 남긴다', () => {
     let state = on;
     for (let i = 0; i < MAX_LOG_ENTRIES + 2; i++) {
-      const entry: VoiceLogEntry = { id: String(i), text: '시작', outcome: 'ignore', reason: '이유' };
+      const entry: VoiceLogEntry = {
+        id: String(i),
+        text: '시작',
+        outcome: 'ignore',
+        reason: '이유',
+        source: 'final',
+        latency: null,
+      };
       state = voiceReducer(state, { type: 'log', entry });
     }
     expect(state.log).toHaveLength(MAX_LOG_ENTRIES);
     expect(state.log[0].id).toBe(String(MAX_LOG_ENTRIES + 1));
+  });
+});
+
+describe('measureLatency', () => {
+  const pending: PendingLatency = { entryId: 'a', from: 'playing', to: 'stopped', receivedAt: 1000, firstResultAt: 600 };
+
+  it('명령이 만들 상태가 되면 인식 결과 수신부터와 첫 인식부터의 시간을 정수 ms로 낸다', () => {
+    expect(measureLatency(pending, 'stopped', 1084.6)).toEqual({ ms: 85, sinceFirstResultMs: 485 });
+  });
+
+  it('아직 명령 전 상태면 기다린다', () => {
+    expect(measureLatency(pending, 'playing', 1500)).toBeNull();
+  });
+
+  it('다른 상태가 되거나 너무 늦게 바뀌면 재지 않는다', () => {
+    expect(measureLatency(pending, 'unready', 1100)).toBe('expired');
+    expect(measureLatency(pending, 'stopped', 1000 + LATENCY_TIMEOUT_MS + 1)).toBe('expired');
+    expect(measureLatency(pending, 'playing', 1000 + LATENCY_TIMEOUT_MS + 1)).toBe('expired');
+  });
+});
+
+describe('summarizeLatencies', () => {
+  it('정지(중간 결과), 정지(최종 결과), 시작 순서로 기록이 있는 것만 평균을 낸다', () => {
+    const records: LatencyRecord[] = [
+      { command: 'start', source: 'final', ms: 400, sinceFirstResultMs: 900 },
+      { command: 'stop', source: 'final', ms: 90, sinceFirstResultMs: 700 },
+      { command: 'stop', source: 'interim', ms: 80, sinceFirstResultMs: 200 },
+      { command: 'stop', source: 'interim', ms: 101, sinceFirstResultMs: 301 },
+    ];
+    expect(summarizeLatencies(records)).toEqual([
+      { command: 'stop', source: 'interim', count: 2, averageMs: 91, averageSinceFirstResultMs: 251 },
+      { command: 'stop', source: 'final', count: 1, averageMs: 90, averageSinceFirstResultMs: 700 },
+      { command: 'start', source: 'final', count: 1, averageMs: 400, averageSinceFirstResultMs: 900 },
+    ]);
+    expect(summarizeLatencies([])).toEqual([]);
+  });
+});
+
+describe('voiceReducer 반응 시간', () => {
+  const entry = (id: string, outcome: VoiceLogEntry['outcome'], source: VoiceLogEntry['source'] = 'final'): VoiceLogEntry => ({
+    id,
+    text: '멈춰',
+    outcome,
+    reason: null,
+    source,
+    latency: null,
+  });
+
+  it('실행한 명령의 기록에 반응 시간을 붙이고 명령·결과 종류와 함께 따로 남긴다', () => {
+    const logged = voiceReducer(INITIAL_VOICE_STATE, { type: 'log', entry: entry('a', 'stop', 'interim') });
+    const state = voiceReducer(logged, { type: 'latency', entryId: 'a', latency: { ms: 85, sinceFirstResultMs: 300 } });
+    expect(state.log[0].latency).toEqual({ ms: 85, sinceFirstResultMs: 300 });
+    expect(state.latencies).toEqual([{ command: 'stop', source: 'interim', ms: 85, sinceFirstResultMs: 300 }]);
+  });
+
+  it('기록이 없거나 명령을 실행하지 않은 기록이면 바꾸지 않는다', () => {
+    const logged = voiceReducer(INITIAL_VOICE_STATE, { type: 'log', entry: entry('a', 'ignore') });
+    const latency = { ms: 1, sinceFirstResultMs: 1 };
+    expect(voiceReducer(logged, { type: 'latency', entryId: 'a', latency })).toBe(logged);
+    expect(voiceReducer(logged, { type: 'latency', entryId: 'b', latency })).toBe(logged);
+  });
+
+  it('반응 시간 기록은 판별 기록과 따로 최대 개수까지 남긴다', () => {
+    let state = INITIAL_VOICE_STATE;
+    for (let i = 0; i < MAX_LATENCY_RECORDS + 2; i++) {
+      state = voiceReducer(state, { type: 'log', entry: entry(String(i), 'stop') });
+      state = voiceReducer(state, { type: 'latency', entryId: String(i), latency: { ms: i, sinceFirstResultMs: i } });
+    }
+    expect(state.log).toHaveLength(MAX_LOG_ENTRIES);
+    expect(state.latencies).toHaveLength(MAX_LATENCY_RECORDS);
+    expect(state.latencies[0].ms).toBe(MAX_LATENCY_RECORDS + 1);
   });
 });
