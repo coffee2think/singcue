@@ -204,3 +204,68 @@ body {
   padding: 8px 16px;
   font: inherit;
 }
+
+.lyric-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.lyric-panel h2 {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+}
+
+.lyric-panel h3 {
+  margin: 8px 0 0;
+  font-size: 1rem;
+}
+
+.lyric-panel__field {
+  display: grid;
+  gap: 4px;
+}
+
+.lyric-panel__field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+  font: inherit;
+}
+
+.lyric-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lyric-panel button {
+  padding: 8px 16px;
+  font: inherit;
+}
+
+.lyric-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lyric-list button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+}
+
+.lyric-list__time {
+  min-width: 4.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.lyric-list button[aria-pressed='true'] {
+  outline: 2px solid currentColor;
+  font-weight: bold;
+}

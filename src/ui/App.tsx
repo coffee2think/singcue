@@ -3,6 +3,7 @@ import type { PlayerAdapter } from '../adapters/playerAdapter/index.ts';
 import { createStorage } from '../adapters/storage.ts';
 import { usePlayback } from '../controller/usePlayback.ts';
 import type { Section } from '../types.ts';
+import { LyricMappingPanel } from './LyricMappingPanel.tsx';
 import { PlaybackControls } from './PlaybackControls.tsx';
 import { PlayerView } from './PlayerView.tsx';
 import { SectionPanel } from './SectionPanel.tsx';
@@ -70,6 +71,12 @@ export function App() {
             videoId={video.request.videoId}
             getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
             onSelect={setSection}
+          />
+          <LyricMappingPanel
+            // 같은 부모의 SectionPanel과 key가 겹치지 않게 앞에 구분자를 붙인다
+            key={`lyrics:${video.request.videoId}`}
+            videoId={video.request.videoId}
+            getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
           />
         </>
       )}
