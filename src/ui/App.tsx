@@ -1,5 +1,6 @@
 import { useReducer } from 'react';
 import { PlayerView } from './PlayerView.tsx';
+import { SettingsPanel } from './SettingsPanel.tsx';
 import { VideoInputForm } from './VideoInputForm.tsx';
 import { initialVideoLoadState, videoLoadReducer, type VideoLoadState } from './videoLoadState.ts';
 import './app.css';
@@ -24,6 +25,8 @@ export function App() {
           <PlayerView request={video.request} dispatch={dispatch} />
         )}
       </section>
+
+      <SettingsPanel />
     </main>
   );
 }

@@ -80,3 +80,67 @@ body {
 .message--error {
   color: var(--error);
 }
+
+.settings {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.settings h2 {
+  margin: 0;
+}
+
+.settings fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  border: 1px solid var(--border);
+}
+
+.settings__field {
+  display: grid;
+  gap: 4px;
+}
+
+.settings__field input,
+.settings__field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+  font: inherit;
+}
+
+.settings__field input {
+  max-width: 12em;
+}
+
+.settings__choice {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings__hint {
+  margin: 0;
+  font-size: 0.875em;
+  opacity: 0.8;
+}
+
+.settings__lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings__actions button {
+  padding: 8px 16px;
+  font: inherit;
+}
