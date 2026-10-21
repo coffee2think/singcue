@@ -28,6 +28,10 @@ export type StorageAdapter = {
   saveSettings(settings: Settings): SaveResult;
   loadVideo(videoId: string): VideoData;
   saveVideo(data: VideoData): SaveResult;
+  /** `singcue:log`의 연습 기록. 형식이 맞는 기록만 읽는다 */
+  loadLog(): PracticeRecord[];
+  /** 연습 기록을 `singcue:log` 끝에 덧붙인다. 실패하면 저장소는 그대로다 */
+  appendLog(records: readonly PracticeRecord[]): SaveResult;
 };
 
 export function createStorage(store: KeyValueStore | null = getLocalStorage()): StorageAdapter {
@@ -56,6 +60,9 @@ export function createStorage(store: KeyValueStore | null = getLocalStorage()): 
     saveSettings: (settings) => write(SETTINGS_KEY, settings),
     loadVideo: (videoId) => toVideoData(videoId, read(videoKey(videoId))),
     saveVideo: (data) => write(videoKey(data.videoId), data),
+    loadLog: () => readLog(store),
+    // 읽을 때 형식이 맞지 않는 기록은 버려지므로, 덧붙여 쓰면 그 기록도 저장소에서 빠진다(내보내기와 같은 기준)
+    appendLog: (records) => (records.length === 0 ? { ok: true } : write(LOG_KEY, [...readLog(store), ...records])),
   };
 }
 
@@ -270,7 +277,7 @@ function restore(store: BackupStore, previous: Map<string, string | null>) {
   }
 }
 
-/** 연습 기록은 아직 쓰는 곳이 없다(단계 5). 형식이 맞는 기록만 읽는다 */
+/** 형식이 맞는 연습 기록만 읽는다. 값이 없거나 손상되면 빈 목록이다 */
 function readLog(store: KeyValueStore | null): PracticeRecord[] {
   if (!store) return [];
   try {
