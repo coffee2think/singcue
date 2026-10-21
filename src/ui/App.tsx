@@ -8,6 +8,7 @@ import type { Section } from '../types.ts';
 import { LyricMappingPanel } from './LyricMappingPanel.tsx';
 import { PlaybackControls } from './PlaybackControls.tsx';
 import { PlayerView } from './PlayerView.tsx';
+import { ReportPanel } from './ReportPanel.tsx';
 import { SectionPanel } from './SectionPanel.tsx';
 import { SettingsPanel } from './SettingsPanel.tsx';
 import { VideoInputForm } from './VideoInputForm.tsx';
@@ -101,6 +102,9 @@ export function App() {
 
       {/* 영상 준비 전에도 켤 수 있다. 그때 들어온 명령은 상태 규칙에 따라 무시로 표시한다 */}
       <VoicePanel voice={voice} />
+
+      {/* 기록은 영상과 상관없이 전체를 센다. 재생이 끝나면 방금 저장된 기록까지 다시 읽는다 */}
+      <ReportPanel playbackState={playback.state} storage={storage} />
 
       <SettingsPanel practiceLogError={practiceLog.error} onDismissPracticeLogError={practiceLog.dismissError} />
     </main>
