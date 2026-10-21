@@ -1,5 +1,6 @@
 // 음성 제어 훅. PRD F2-1~F2-6, 기술 설계 문서의 "음성 명령 처리 흐름"과 "오류 처리"를 따른다.
 // speechAdapter의 인식 결과를 commandMatcher.decide()로 판별하고, 그 결과만 따라 usePlayback의 재생·정지를 부른다.
+// 실행한 명령은 인식 결과를 받은 뒤 재생 상태가 바뀔 때까지 걸린 시간을 잰다(PRD F2-6).
 
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { MIN_DB, startMicMeter, type MicEvent, type MicMeter } from '../adapters/micMeter/index.ts';
@@ -22,6 +23,28 @@ export const AUTOPLAY_TIMEOUT_MS = 3000;
 /** 화면에 남기는 판별 기록 수 */
 export const MAX_LOG_ENTRIES = 10;
 
+/** 평균을 낼 때 남기는 반응 시간 기록 수 */
+export const MAX_LATENCY_RECORDS = 50;
+
+/** 명령 후 이 시간(ms)이 지나서야 상태가 바뀌면 명령의 반응으로 보지 않는다(자동재생 차단 뒤 버튼을 누른 경우 등) */
+export const LATENCY_TIMEOUT_MS = AUTOPLAY_TIMEOUT_MS;
+
+/** 명령을 실행한 인식 결과의 종류. 중간 결과는 정지 즉시 실행으로만 실행된다 */
+export type ResultSource = 'interim' | 'final';
+
+/** 실행한 명령 하나의 반응 시간(ms) */
+export type Latency = {
+  /** 명령을 실행한 인식 결과를 받은 뒤 재생 상태가 바뀔 때까지 */
+  ms: number;
+  /** 같은 발화의 첫 인식 결과를 받은 뒤 재생 상태가 바뀔 때까지. 중간 결과로 실행하면 줄어드는 부분이 여기 들어간다 */
+  sinceFirstResultMs: number;
+};
+
+export type LatencyRecord = Latency & {
+  command: 'stop' | 'start';
+  source: ResultSource;
+};
+
 export type VoiceStatus = 'off' | 'starting' | 'on';
 
 /** 판별 기록 하나. 실행한 명령과 무시한 발화를 이유와 함께 보여 준다(PRD F2-4) */
@@ -32,6 +55,9 @@ export type VoiceLogEntry = {
   outcome: 'stop' | 'start' | 'phrase' | 'ignore';
   /** 무시했거나 실행하지 못한 이유. 실행한 명령이면 null */
   reason: string | null;
+  source: ResultSource;
+  /** 실행한 명령의 반응 시간. 아직 상태가 바뀌지 않았거나 재지 못했으면 null */
+  latency: Latency | null;
 };
 
 export type VoiceState = {
@@ -48,6 +74,8 @@ export type VoiceState = {
   silent: boolean;
   /** 새것이 앞에 온다 */
   log: VoiceLogEntry[];
+  /** 실행한 명령의 반응 시간. 새것이 앞에 온다. 판별 기록이 넘쳐도 평균을 낼 수 있게 따로 남긴다 */
+  latencies: LatencyRecord[];
 };
 
 export type VoiceAction =
@@ -61,7 +89,8 @@ export type VoiceAction =
   | { type: 'speechError'; error: SpeechError }
   | { type: 'speechEnd'; restarting: boolean }
   | { type: 'heard'; text: string }
-  | { type: 'log'; entry: VoiceLogEntry };
+  | { type: 'log'; entry: VoiceLogEntry }
+  | { type: 'latency'; entryId: string; latency: Latency };
 
 export const INITIAL_VOICE_STATE: VoiceState = {
   status: 'off',
@@ -71,6 +100,7 @@ export const INITIAL_VOICE_STATE: VoiceState = {
   error: null,
   silent: false,
   log: [],
+  latencies: [],
 };
 
 export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState {
@@ -103,6 +133,16 @@ export function voiceReducer(state: VoiceState, action: VoiceAction): VoiceState
       return { ...state, heard: action.text, silent: false, error: null };
     case 'log':
       return { ...state, log: [action.entry, ...state.log].slice(0, MAX_LOG_ENTRIES) };
+    case 'latency': {
+      const target = state.log.find((entry) => entry.id === action.entryId);
+      if (target === undefined || (target.outcome !== 'stop' && target.outcome !== 'start')) return state;
+      const record: LatencyRecord = { ...action.latency, command: target.outcome, source: target.source };
+      return {
+        ...state,
+        log: state.log.map((entry) => (entry === target ? { ...entry, latency: action.latency } : entry)),
+        latencies: [record, ...state.latencies].slice(0, MAX_LATENCY_RECORDS),
+      };
+    }
   }
 }
 
@@ -126,6 +166,66 @@ export function judgeResult(result: SpeechResult, input: JudgeInput): Decision |
   const decision = decide(result.candidates, input.state, input.settings, input.lastCommandAt, input.now);
   if (!result.isFinal && decision.action !== 'stop') return null;
   return decision;
+}
+
+/** 실행한 명령이 재생 상태를 바꾸기를 기다리는 중 */
+export type PendingLatency = {
+  entryId: string;
+  /** 명령을 실행할 때의 상태 */
+  from: PlaybackState;
+  /** 명령이 만들 상태 */
+  to: PlaybackState;
+  /** 명령을 실행한 인식 결과를 받은 시각(performance.now()) */
+  receivedAt: number;
+  /** 같은 발화의 첫 인식 결과를 받은 시각 */
+  firstResultAt: number;
+};
+
+/**
+ * 재생 상태를 보고 반응 시간을 정한다.
+ * - 아직 명령 전 상태면 null(더 기다림)
+ * - 명령이 만들 상태가 됐으면 반응 시간
+ * - 다른 상태가 됐거나 너무 늦게 바뀌었으면 'expired'(재지 않고 버림)
+ */
+export function measureLatency(pending: PendingLatency, state: PlaybackState, now: number): Latency | 'expired' | null {
+  const ms = now - pending.receivedAt;
+  if (state === pending.from) return ms > LATENCY_TIMEOUT_MS ? 'expired' : null;
+  if (state !== pending.to || ms > LATENCY_TIMEOUT_MS) return 'expired';
+  return { ms: Math.round(ms), sinceFirstResultMs: Math.round(now - pending.firstResultAt) };
+}
+
+export type LatencySummary = {
+  command: 'stop' | 'start';
+  source: ResultSource;
+  count: number;
+  /** 평균(ms, 정수로 반올림) */
+  averageMs: number;
+  averageSinceFirstResultMs: number;
+};
+
+/** 명령과 인식 결과 종류별 평균. 정지(중간 결과), 정지(최종 결과), 시작 순서로 기록이 있는 것만 낸다 */
+export function summarizeLatencies(records: readonly LatencyRecord[]): LatencySummary[] {
+  const groups: Pick<LatencySummary, 'command' | 'source'>[] = [
+    { command: 'stop', source: 'interim' },
+    { command: 'stop', source: 'final' },
+    { command: 'start', source: 'interim' },
+    { command: 'start', source: 'final' },
+  ];
+  return groups.flatMap(({ command, source }) => {
+    const group = records.filter((record) => record.command === command && record.source === source);
+    if (group.length === 0) return [];
+    const average = (pick: (record: LatencyRecord) => number) =>
+      Math.round(group.reduce((sum, record) => sum + pick(record), 0) / group.length);
+    return [
+      {
+        command,
+        source,
+        count: group.length,
+        averageMs: average((record) => record.ms),
+        averageSinceFirstResultMs: average((record) => record.sinceFirstResultMs),
+      },
+    ];
+  });
 }
 
 const STATE_LABELS: Record<PlaybackState, string> = {
@@ -190,6 +290,19 @@ export function useVoice({ playback, section, storage }: Options): UseVoice {
   const sessionRef = useRef(0);
   const lastCommandAtRef = useRef<number | null>(null);
   const handledRef = useRef(new Set<string>());
+  /** 지금 발화의 첫 인식 결과를 받은 시각 */
+  const firstResultRef = useRef<{ utteranceId: string; at: number } | null>(null);
+  const pendingLatencyRef = useRef<PendingLatency | null>(null);
+
+  // 반응 시간 측정. 재생 상태가 바뀌어 화면에 반영된 뒤 시각을 잰다
+  useEffect(() => {
+    const pending = pendingLatencyRef.current;
+    if (pending === null) return;
+    const latency = measureLatency(pending, playback.state, performance.now());
+    if (latency === null) return;
+    pendingLatencyRef.current = null;
+    if (latency !== 'expired') dispatch({ type: 'latency', entryId: pending.entryId, latency });
+  }, [playback.state]);
 
   // 자동재생 차단 감시. 시작 명령마다 번호를 붙이고, 3초가 지나면 그 번호를 기록한다
   const [startRequest, setStartRequest] = useState<number | null>(null);
@@ -211,10 +324,14 @@ export function useVoice({ playback, section, storage }: Options): UseVoice {
   };
 
   const handleResult = (result: SpeechResult) => {
+    const now = performance.now();
+    if (firstResultRef.current?.utteranceId !== result.utteranceId) {
+      firstResultRef.current = { utteranceId: result.utteranceId, at: now };
+    }
+    const firstResultAt = firstResultRef.current.at;
     dispatch({ type: 'heard', text: result.candidates[0] });
     const settings = storage.loadSettings();
     const state = playback.state;
-    const now = performance.now();
     const decision = judgeResult(result, {
       state,
       settings,
@@ -224,8 +341,13 @@ export function useVoice({ playback, section, storage }: Options): UseVoice {
     });
     if (decision === null) return;
 
+    const entryId = `${result.utteranceId}:${now}`;
+    const source: ResultSource = result.isFinal ? 'final' : 'interim';
     const entry = (outcome: VoiceLogEntry['outcome'], reason: string | null) =>
-      dispatch({ type: 'log', entry: { id: `${result.utteranceId}:${now}`, text: result.candidates[0], outcome, reason } });
+      dispatch({
+        type: 'log',
+        entry: { id: entryId, text: result.candidates[0], outcome, reason, source, latency: null },
+      });
 
     switch (decision.action) {
       case 'stop':
@@ -236,6 +358,15 @@ export function useVoice({ playback, section, storage }: Options): UseVoice {
         }
         handledRef.current.add(result.utteranceId);
         lastCommandAtRef.current = now;
+        // 기록을 먼저 남겨, 상태가 바뀌면 반응 시간을 이 기록에 붙인다
+        entry(decision.action, null);
+        pendingLatencyRef.current = {
+          entryId,
+          from: state,
+          to: decision.action === 'stop' ? 'stopped' : 'playing',
+          receivedAt: now,
+          firstResultAt,
+        };
         if (decision.action === 'stop') {
           playback.stop();
         } else {
@@ -243,7 +374,6 @@ export function useVoice({ playback, section, storage }: Options): UseVoice {
           setStartRequest((current) => (current ?? 0) + 1);
           setTimedOutRequest(null);
         }
-        entry(decision.action, null);
         return;
       }
       case 'phrase':

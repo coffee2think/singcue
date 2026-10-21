@@ -84,3 +84,37 @@
   font-size: 0.875em;
   opacity: 0.8;
 }
+
+.voice__latency {
+  flex-basis: 100%;
+  font-size: 0.875em;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice__latencies {
+  display: grid;
+  gap: 4px;
+}
+
+.voice__latencies h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.voice__note {
+  margin: 0;
+  font-size: 0.875em;
+  opacity: 0.8;
+}
+
+.voice__latencies table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice__latencies th,
+.voice__latencies td {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
