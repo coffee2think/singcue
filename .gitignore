@@ -4,3 +4,36 @@ dist
 *.tsbuildinfo
 .vite
 coverage
+
+# 저작권: 음원·영상·가사 파일은 저장소에 넣지 않는다 (README "가사·음원 미포함 규칙")
+*.mp3
+*.wav
+*.flac
+*.aac
+*.m4a
+*.ogg
+*.oga
+*.opus
+*.wma
+*.aif
+*.aiff
+*.mp4
+*.m4v
+*.mkv
+*.webm
+*.mov
+*.avi
+*.wmv
+*.flv
+*.3gp
+*.lrc
+*.srt
+*.vtt
+
+# 사용자 내보내기(JSON 백업) 파일
+singcue-backup*.json
+singcue-export*.json
+
+# PoC에서 새로 내려받은 로그에는 가사가 들어 있다. 가사를 지운 기존 로그만 저장소에 둔다
+poc/poc_log_*.json
+!poc/poc_log_261021.json
