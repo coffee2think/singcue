@@ -1,5 +1,6 @@
-/* 연습 기록 저장 실패 안내. 바로 아래 백업 패널과 떨어뜨려 두고, 닫기 버튼을 문장 옆에 둔다 */
-.practice-log-error {
+/* 연습 기록 저장 실패 안내. 위 설정 form과 떨어뜨려 두고, 닫기 버튼을 문장 옆에 둔다.
+   app.css의 .message { margin: 0 }이 뒤에 불려 오므로 두 클래스를 함께 써서 여백을 지킨다 */
+.message.practice-log-error {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
