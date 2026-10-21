@@ -30,7 +30,7 @@ type Notice = { kind: 'saved' | 'reset' } | { kind: 'error'; reason: Extract<Sav
 
 const END_ACTIONS = Object.keys(END_ACTION_LABELS) as EndAction[];
 
-/** 설정 패널(PRD F2-7, F2-9). 저장 버튼을 누를 때 입력값을 확인해 `singcue:settings`에 저장한다 */
+/** 설정 패널(PRD F2-7, F2-9, F4-4). 저장 버튼을 누를 때 입력값을 확인해 `singcue:settings`에 저장한다 */
 export function SettingsPanel({
   storage: givenStorage,
   onChange,
@@ -49,7 +49,7 @@ export function SettingsPanel({
   }
 
   function save(panel: PanelSettings, kind: 'saved' | 'reset') {
-    // 패널에 없는 항목(유사도 기준)은 저장된 값을 그대로 둔다
+    // 설정에 항목이 늘어도 패널에 없는 항목은 저장된 값을 그대로 둔다
     const next: Settings = { ...saved, ...panel };
     const result = storage.saveSettings(next);
     if (!result.ok) {
@@ -142,6 +142,22 @@ export function SettingsPanel({
             명령어를 뺀 나머지 글자가 이보다 많으면 가사로 보고 무시합니다. 기본 {DEFAULT_SETTINGS.shortRuleChars}자
           </p>
           <FieldError field="shortRuleChars" errors={errors} />
+        </div>
+
+        <div className="settings__field">
+          <label htmlFor="settings-similarityThreshold">구절 인식 유사도 기준(0~1)</label>
+          <input
+            {...fieldProps('similarityThreshold')}
+            type="text"
+            inputMode="decimal"
+            value={draft.similarityThreshold}
+            onChange={(event) => update('similarityThreshold', event.target.value)}
+          />
+          <p className="settings__hint">
+            말한 구절과 가사 줄의 유사도가 이 값 이상이면 다음 구절로 이동합니다. 오인식이 잦은 곡은 낮추고, 엉뚱한
+            구절로 자주 이동하면 높이세요. 다음 인식부터 적용됩니다. 기본 {DEFAULT_SETTINGS.similarityThreshold}
+          </p>
+          <FieldError field="similarityThreshold" errors={errors} />
         </div>
 
         <div className="settings__field">
