@@ -118,3 +118,22 @@
   border: 1px solid var(--border);
   text-align: left;
 }
+
+.voice__match {
+  flex-basis: 100%;
+  font-size: 0.875em;
+  overflow-wrap: anywhere;
+}
+
+/* 구절 인식 결과. 이동하지 않았을 때는 다시 말하도록 눈에 띄게 둔다 */
+.voice__phrase {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.voice__phrase--stayed {
+  border: 2px solid var(--error);
+}

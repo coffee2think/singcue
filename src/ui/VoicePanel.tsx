@@ -1,6 +1,8 @@
 import { MIN_DB } from '../adapters/micMeter/index.ts';
+import { formatTime } from '../core/lyricParser.ts';
 import {
   summarizeLatencies,
+  type PhraseOutcome,
   type ResultSource,
   type UseVoice,
   type VoiceLogEntry,
@@ -28,10 +30,16 @@ const SOURCE_LABELS: Record<ResultSource, string> = {
   final: '최종 결과',
 };
 
-/** 음성 패널(PRD F2-1~F2-6). 인식 켜기·끄기, 마이크 장치와 입력 레벨, 판별 기록, 명령의 반응 시간을 보여 준다 */
+/**
+ * 음성 패널(PRD F2-1~F2-6, F4-1~F4-3). 인식 켜기·끄기, 마이크 장치와 입력 레벨, 판별 기록, 명령의 반응 시간,
+ * 구절 인식 점프 결과를 보여 준다
+ */
 export function VoicePanel({ voice }: Props) {
   const active = voice.status !== 'off';
   const latencySummaries = summarizeLatencies(voice.latencies);
+  // 가장 최근 판별이 구절일 때만 결과를 크게 보여 준다. 그 뒤에 다른 말을 하면 판별 기록에만 남는다
+  const latest = voice.log[0];
+  const latestPhrase = latest?.outcome === 'phrase' ? latest : null;
 
   return (
     <section className="voice" aria-label="음성 제어">
@@ -85,12 +93,17 @@ export function VoicePanel({ voice }: Props) {
 
       {active && voice.heard !== null && <p className="voice__heard">들은 말: “{voice.heard}”</p>}
 
+      {latestPhrase?.phrase !== undefined && (
+        <PhraseResult outcome={latestPhrase.phrase} reason={latestPhrase.reason} />
+      )}
+
       {voice.log.length > 0 && (
         <ol className="voice__log" aria-label="판별 기록">
           {voice.log.map((entry) => (
             <li key={entry.id} className={`voice__entry voice__entry--${entry.outcome}`}>
               <span className="voice__outcome">{OUTCOME_LABELS[entry.outcome]}</span>
               <span className="voice__text">“{entry.text}”</span>
+              {entry.phrase !== undefined && <span className="voice__match">{matchText(entry.phrase)}</span>}
               {entry.reason !== null && <span className="voice__reason">{entry.reason}</span>}
               {entry.latency !== null && (
                 <span className="voice__latency">
@@ -135,5 +148,27 @@ export function VoicePanel({ voice }: Props) {
         </div>
       )}
     </section>
+  );
+}
+
+/** 가장 비슷한 구절과 점수. 가사 매핑이 없으면 그 사실만 쓴다 */
+function matchText(outcome: PhraseOutcome): string {
+  if (outcome.kind === 'no-lines') return '비교할 가사 구절이 없습니다';
+  const line = `${outcome.lineIndex + 1}번째${outcome.last ? '(마지막)' : ''} 구절 “${outcome.text}”`;
+  const score = `유사도 ${outcome.score.toFixed(2)} / 기준 ${outcome.threshold.toFixed(2)}`;
+  if (outcome.kind === 'below') return `가장 가까운 구절: ${line} · ${score}`;
+  if (outcome.kind !== 'jump' || outcome.from === null) return `인식한 구절: ${line} · ${score}`;
+  return `${line} · ${score} → ${formatTime(outcome.target)}의 프리롤 앞 ${formatTime(outcome.from)}부터 재생`;
+}
+
+/** 최근 구절 판별 결과(PRD F4-2). 이동하지 않았으면 이유와 다시 말하라는 안내를 경고로 보여 준다 */
+function PhraseResult({ outcome, reason }: { outcome: PhraseOutcome; reason: string | null }) {
+  const moved = reason === null;
+  return (
+    <div className={`voice__phrase voice__phrase--${moved ? 'moved' : 'stayed'}`} role={moved ? 'status' : 'alert'}>
+      <strong>{moved ? '구절 인식: 다음 구절로 이동' : '구절 인식: 이동하지 않음'}</strong>
+      <span>{matchText(outcome)}</span>
+      {reason !== null && <span>{reason}</span>}
+    </div>
   );
 }
