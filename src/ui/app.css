@@ -80,3 +80,46 @@ body {
 .message--error {
   color: var(--error);
 }
+
+.section-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.section-panel h2 {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+}
+
+.section-panel__marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-panel button {
+  padding: 8px 16px;
+  font: inherit;
+}
+
+.section-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.section-list button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+}
+
+.section-list button[aria-pressed='true'] {
+  outline: 2px solid currentColor;
+  font-weight: bold;
+}

@@ -1,11 +1,14 @@
-import { useReducer } from 'react';
+import { useReducer, useRef } from 'react';
+import type { PlayerAdapter } from '../adapters/playerAdapter/index.ts';
 import { PlayerView } from './PlayerView.tsx';
+import { SectionPanel } from './SectionPanel.tsx';
 import { VideoInputForm } from './VideoInputForm.tsx';
 import { initialVideoLoadState, videoLoadReducer, type VideoLoadState } from './videoLoadState.ts';
 import './app.css';
 
 export function App() {
   const [video, dispatch] = useReducer(videoLoadReducer, initialVideoLoadState);
+  const playerRef = useRef<PlayerAdapter | null>(null);
 
   return (
     <main className="app">
@@ -21,9 +24,17 @@ export function App() {
         {video.status === 'empty' ? (
           <p className="player player--empty">영상을 불러오면 여기에 플레이어가 표시됩니다.</p>
         ) : (
-          <PlayerView request={video.request} dispatch={dispatch} />
+          <PlayerView request={video.request} dispatch={dispatch} playerRef={playerRef} />
         )}
       </section>
+
+      {video.status === 'ready' && (
+        <SectionPanel
+          key={video.request.videoId}
+          videoId={video.request.videoId}
+          getCurrentTime={() => playerRef.current?.getCurrentTime() ?? null}
+        />
+      )}
     </main>
   );
 }
