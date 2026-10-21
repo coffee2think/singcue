@@ -1,7 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../core/defaultSettings.ts';
-import type { Settings, VideoData } from '../types.ts';
-import { createStorage, SETTINGS_KEY, videoKey, type KeyValueStore } from './storage.ts';
+import type { PracticeRecord, Settings, VideoData } from '../types.ts';
+import {
+  BACKUP_VERSION,
+  createStorage,
+  exportBackup,
+  importBackup,
+  LOG_KEY,
+  parseBackup,
+  serializeBackup,
+  SETTINGS_KEY,
+  videoKey,
+  type BackupStore,
+  type KeyValueStore,
+} from './storage.ts';
 
 /** localStorage와 같은 동작을 하는 메모리 저장소 */
 function memoryStore(initial: Record<string, string> = {}): KeyValueStore & { data: Map<string, string> } {
@@ -212,5 +224,171 @@ describe('localStorage를 쓸 수 없는 환경', () => {
 
     expect(createStorage().saveVideo(video)).toEqual({ ok: true });
     expect(store.data.has('singcue:video:abc123XYZ_-')).toBe(true);
+  });
+});
+
+/** 키 목록·삭제까지 되는 메모리 저장소. quota를 주면 키와 값의 글자 수 합이 넘칠 때 localStorage처럼 예외를 던진다 */
+function backupStore(initial: Record<string, string> = {}, quota = Infinity): BackupStore & { data: Map<string, string> } {
+  const data = new Map(Object.entries(initial));
+  const size = () => [...data].reduce((sum, [key, value]) => sum + key.length + value.length, 0);
+  return {
+    data,
+    get length() {
+      return data.size;
+    },
+    key: (index) => [...data.keys()][index] ?? null,
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => {
+      const old = data.get(key);
+      const next = size() - (old === undefined ? 0 : key.length + old.length) + key.length + String(value).length;
+      if (next > quota) throw new DOMException('quota', 'QuotaExceededError');
+      data.set(key, String(value));
+    },
+    removeItem: (key) => {
+      data.delete(key);
+    },
+  };
+}
+
+const otherVideo: VideoData = {
+  videoId: 'otherVid_02',
+  sections: [],
+  lines: [{ t: 3.5, text: '가상의 다른 구절' }],
+  endT: null,
+};
+
+const record: PracticeRecord = { videoId: video.videoId, sectionId: 's1', at: '2026-10-21T09:00:00.000Z', seconds: 12.5 };
+
+/** 설정·영상 둘·연습 기록과 관계없는 키가 든 저장소 */
+function filledStore() {
+  return backupStore({
+    [SETTINGS_KEY]: JSON.stringify(customSettings),
+    [videoKey(video.videoId)]: JSON.stringify(video),
+    [videoKey(otherVideo.videoId)]: JSON.stringify(otherVideo),
+    [LOG_KEY]: JSON.stringify([record]),
+    'other-app:key': '"관계없는 값"',
+  });
+}
+
+describe('백업 내보내기', () => {
+  it('{ version, settings, videos, log } 형식으로 전체 데이터를 모은다', () => {
+    expect(exportBackup(filledStore())).toEqual({
+      version: BACKUP_VERSION,
+      settings: customSettings,
+      videos: [video, otherVideo],
+      log: [record],
+    });
+  });
+
+  it('저장된 것이 없으면 기본 설정과 빈 목록을 내보낸다', () => {
+    expect(exportBackup(backupStore())).toEqual({ version: 1, settings: DEFAULT_SETTINGS, videos: [], log: [] });
+  });
+
+  it('localStorage를 쓸 수 없어도 기본값으로 내보낸다', () => {
+    expect(exportBackup(null)).toEqual({ version: 1, settings: DEFAULT_SETTINGS, videos: [], log: [] });
+  });
+
+  it('손상된 연습 기록은 빈 목록으로, 형식이 틀린 기록은 빼고 내보낸다', () => {
+    expect(exportBackup(backupStore({ [LOG_KEY]: '[' })).log).toEqual([]);
+    expect(exportBackup(backupStore({ [LOG_KEY]: JSON.stringify([record, { videoId: 1 }]) })).log).toEqual([record]);
+  });
+
+  it('직렬화한 내용은 다시 읽으면 같은 백업이 된다', () => {
+    const backup = exportBackup(filledStore());
+    expect(parseBackup(serializeBackup(backup))).toEqual({ ok: true, backup });
+  });
+});
+
+describe('백업 불러오기', () => {
+  it('내보낸 파일을 빈 저장소에 불러오면 같은 구절과 시간이 복원된다', () => {
+    const text = serializeBackup(exportBackup(filledStore()));
+    const target = backupStore();
+
+    expect(importBackup(text, target)).toMatchObject({ ok: true });
+    const storage = createStorage(target);
+    expect(storage.loadVideo(video.videoId)).toEqual(video);
+    expect(storage.loadVideo(otherVideo.videoId)).toEqual(otherVideo);
+    expect(storage.loadSettings()).toEqual(customSettings);
+    expect(exportBackup(target)).toEqual(exportBackup(filledStore()));
+  });
+
+  it('설정과 연습 기록은 바꾸고, 영상은 파일에 있는 것만 덮어쓴다', () => {
+    const text = serializeBackup({ version: 1, settings: DEFAULT_SETTINGS, videos: [otherVideo], log: [] });
+    const changedOther = { ...otherVideo, lines: [{ t: 9, text: '가상의 바뀐 구절' }] };
+    const target = backupStore({
+      [SETTINGS_KEY]: JSON.stringify(customSettings),
+      [videoKey(video.videoId)]: JSON.stringify(video),
+      [videoKey(otherVideo.videoId)]: JSON.stringify(changedOther),
+      [LOG_KEY]: JSON.stringify([record]),
+    });
+
+    expect(importBackup(text, target)).toMatchObject({ ok: true });
+    const storage = createStorage(target);
+    expect(storage.loadSettings()).toEqual(DEFAULT_SETTINGS);
+    expect(storage.loadVideo(otherVideo.videoId)).toEqual(otherVideo);
+    expect(storage.loadVideo(video.videoId)).toEqual(video);
+    expect(JSON.parse(target.data.get(LOG_KEY)!)).toEqual([]);
+  });
+
+  const valid = { version: 1, settings: customSettings, videos: [video], log: [record] };
+  const withVideo = (patch: object) => JSON.stringify({ ...valid, videos: [{ ...video, ...patch }] });
+  it.each([
+    ['JSON이 아님', '노래 연습 기록', 'invalid-json'],
+    ['손상된 JSON', '{"version":1,', 'invalid-json'],
+    ['빈 파일', '', 'invalid-json'],
+    ['배열', '[]', 'invalid-format'],
+    ['version 없음', JSON.stringify({ ...valid, version: undefined }), 'invalid-format'],
+    ['다른 version', JSON.stringify({ ...valid, version: 2 }), 'unsupported-version'],
+    ['문자열 version', JSON.stringify({ ...valid, version: '1' }), 'unsupported-version'],
+    ['settings 없음', JSON.stringify({ ...valid, settings: undefined }), 'invalid-format'],
+    ['settings 항목이 빠짐', JSON.stringify({ ...valid, settings: { ...customSettings, preroll: undefined } }), 'invalid-format'],
+    ['videos가 객체', JSON.stringify({ ...valid, videos: {} }), 'invalid-format'],
+    ['구절 시간이 문자열', withVideo({ lines: [{ t: '30', text: '가상' }] }), 'invalid-format'],
+    ['구간 끝이 없음', withVideo({ sections: [{ id: 's', name: '가', start: 1 }] }), 'invalid-format'],
+    ['endT가 문자열', withVideo({ endT: '38' }), 'invalid-format'],
+    ['videoId가 빈 문자열', withVideo({ videoId: '' }), 'invalid-format'],
+    ['같은 영상이 두 번', JSON.stringify({ ...valid, videos: [video, video] }), 'invalid-format'],
+    ['log 없음', JSON.stringify({ ...valid, log: undefined }), 'invalid-format'],
+    ['기록 시간이 숫자가 아님', JSON.stringify({ ...valid, log: [{ ...record, seconds: '12' }] }), 'invalid-format'],
+  ])('%s이면 기존 데이터를 건드리지 않고 이유를 알린다', (_, text, reason) => {
+    const target = filledStore();
+    const before = new Map(target.data);
+
+    expect(importBackup(text, target)).toEqual({ ok: false, reason });
+    expect(target.data).toEqual(before);
+  });
+
+  it('쓰는 도중 저장 공간이 부족하면 쓴 키를 원래 값으로 되돌린다', () => {
+    const initial = { [SETTINGS_KEY]: JSON.stringify(DEFAULT_SETTINGS), [videoKey('keepVid_003')]: '{"lines":[]}' };
+    const text = serializeBackup(exportBackup(filledStore()));
+    // 설정·기록·첫 영상까지는 들어가고 둘째 영상에서 넘친다
+    const firstThree = [SETTINGS_KEY, LOG_KEY, videoKey(video.videoId)];
+    const quota =
+      videoKey('keepVid_003').length +
+      initial[videoKey('keepVid_003')].length +
+      firstThree.reduce((sum, key) => sum + key.length + filledStore().data.get(key)!.length, 0) +
+      10;
+    const target = backupStore(initial, quota);
+
+    expect(importBackup(text, target)).toMatchObject({ ok: false, reason: 'quota-exceeded' });
+    expect(Object.fromEntries(target.data)).toEqual(initial);
+  });
+
+  it('localStorage를 쓸 수 없으면 write-error로 알린다', () => {
+    const text = serializeBackup(exportBackup(filledStore()));
+    expect(importBackup(text, null)).toMatchObject({ ok: false, reason: 'write-error' });
+  });
+
+  it('형식 확인이 먼저라 저장소가 없어도 형식 오류를 알린다', () => {
+    expect(importBackup('{', null)).toEqual({ ok: false, reason: 'invalid-json' });
+  });
+
+  it('파일에 있던 알 수 없는 항목은 저장하지 않는다', () => {
+    const text = JSON.stringify({ ...valid, extra: true, videos: [{ ...video, audioFile: 'x.mp3' }] });
+    const target = backupStore();
+
+    expect(importBackup(text, target)).toMatchObject({ ok: true });
+    expect(JSON.parse(target.data.get(videoKey(video.videoId))!)).toEqual(video);
+    expect(target.data.has('extra')).toBe(false);
   });
 });

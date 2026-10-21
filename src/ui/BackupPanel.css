@@ -1,0 +1,31 @@
+.backup {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.backup h2 {
+  margin: 0;
+}
+
+.backup__hint {
+  margin: 0;
+  font-size: 0.875em;
+  opacity: 0.8;
+}
+
+.backup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.backup__actions button {
+  padding: 8px 16px;
+  font: inherit;
+}
+
+/* 파일 선택은 "JSON 불러오기" 버튼으로 연다 */
+.backup__file {
+  display: none;
+}
