@@ -81,6 +81,23 @@ body {
   color: var(--error);
 }
 
+.playback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.playback__buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.playback button {
+  padding: 8px 16px;
+  font: inherit;
+}
+
 .section-panel {
   display: grid;
   gap: 8px;

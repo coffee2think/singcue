@@ -67,3 +67,15 @@
 - 구절 하나만 고치거나 지우는 편집은 입력란을 고쳐 "목록 만들기"로 다시 반영하는 방식뿐이다. "목록 만들기"는 찍은 시간을 포함해 목록 전체를 입력란 내용으로 바꾼다.
 - 재생 중일 때만 찍기 버튼을 받도록 제한하는 일은 재생 상태를 다루는 #7(`usePlayback`)이 병합된 뒤 필요하면 연결한다.
 - 매핑 JSON 내보내기·불러오기(F3-4)는 별도 이슈 범위다.
+
+## 7. main 반영과 충돌 해결 (#43 병합 후)
+
+- 버튼 재생·정지(#43, `usePlayback`)가 main에 병합돼 `src/ui/App.tsx`가 충돌했다. `origin/main`(`a068042`)을 merge commit으로 반영했다(force push 없음).
+- 해결: main의 `PlaybackControls`·`usePlayback` 연결을 그대로 두고, `LyricMappingPanel`은 main이 `PlaybackControls`·`SectionPanel`을 묶은 fragment 안 `SectionPanel` 바로 뒤로 옮겼다. 같은 부모 안이라 `key={`lyrics:${videoId}`}`는 그대로 둔다. `app.css`는 자동 병합됐고, main 대비 차이는 이번에 추가한 패널 스타일뿐인 것을 확인했다.
+- `usePlayback`과의 관계: `usePlayback`은 재생 상태(`state`)와 `play`·`stop`만 내주고 현재 위치는 내주지 않는다. main의 `SectionPanel`도 여전히 `playerRef.current.getCurrentTime()`으로 위치를 읽으므로, 타이밍 찍기도 같은 방식을 유지했다. 재생 상태로 찍기 버튼을 제한하는 일은 이번에도 하지 않았다(6절 보류 사항 그대로). 코드 정리는 필요 없었다.
+
+**재검증**
+
+- `npm test`: 테스트 파일 24개, 테스트 330개 통과. `npm run lint` 오류 없음, `npm run build` 통과
+- 브라우저(앱 내 브라우저, `localhost:5187`, `dQw4w9WgXcQ`): 구간 1을 고르고 "재생" 버튼 → "재생 중 · 구간 1 0:07부터(프리롤 적용)", 재생 중 첫 구절을 찍자 0:05.7(프리롤 위치 직후)이 기록되고 다음 구절이 골라짐. 5초 뒤 두 번째 구절을 찍자 0:10.7. "정지" 버튼 → "정지" 표시, 정지 상태에서 2초 간격으로 세 번째 구절과 마지막 구절 다음 위치를 찍자 둘 다 0:19.5(멈춘 위치)로 기록. 구간 데이터는 그대로 남음. 병합 후 콘솔 오류 없음
+- 미확인: 음성 명령으로 재생·정지한 상태에서의 찍기(음성 연결은 아직 main에 없음)
